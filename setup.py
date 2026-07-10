@@ -42,7 +42,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'powheg-workflow=powheg_workflow.cli:run_workflow',
+            'powgatory=powheg_workflow.cli:run_workflow',
         ],
     },
     python_requires='>=3.7',
