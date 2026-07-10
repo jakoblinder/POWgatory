@@ -201,7 +201,7 @@ If you have questions, complaints, or want to report a bug, please submit a tick
 
 ## 📜 LICENSE
 
-POWGATORY™ is licensed under the MIT License. The MIT people, very sad people, sometimes the worst people, capped licensing at MIT. We had to invent a new license because this tool demanded it. Tremendous demand. 13/10. Nobody knew licenses could be this big. Many such cases.
+POWGATORY™ is licensed under the GNU GENERAL PUBLIC LICENSE.
 
 ---
 
