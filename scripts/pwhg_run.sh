@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# Store commandline arguments
+JOBCODE="$1"
+SEED="$2"
+PRG="$3"
+LOGFILE="$4"
+
+echo "[${JOBCODE} (`hostname`)] Received: SEED=${SEED}, PRG=${PRG}, LOGFILE=${LOGFILE}"
+
+
+# if [[ "$PRG" =~ "lhef" ]] || [[ "$PRG" =~ "PYTHIA" ]]; then
+#     if [ -f "${JOBCODE}-powheg.input" ]; then
+#         echo "[${JOBCODE} (`hostname`)] Running: ${PRG} > logs/${LOGFILE}-${SEED}.log < input-${SEED} 2>&1"
+#         ${PRG} > ${LOGFILE} < input-${SEED} 2>&1
+#     else
+#         echo "[${JOBCODE} (`hostname`)] WARNING: No ${JOBCODE}-powheg.input file. Seed is skipped."
+#         sleep 1s
+#     fi
+# else
+
+echo "[${JOBCODE} (`hostname`)] Running: echo ${SEED} | ${PRG} > ${LOGFILE} 2>&1"
+echo ${SEED} | ${PRG} > ${LOGFILE} 2>&1
+# fi

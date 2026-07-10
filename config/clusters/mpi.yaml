@@ -1,0 +1,12 @@
+# MPI Cluster Configuration
+cluster_name: mpi
+
+# Resource defaults
+default_partition: alma
+tasks_per_node: 64
+max_nodes: 108
+
+# SLURM configuration/ limits
+slurm:
+  time_limit: "24:00:00"
+  max_parallel_jobs: 1000

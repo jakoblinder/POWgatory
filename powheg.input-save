@@ -1,0 +1,291 @@
+#------------------------------------------------
+#   INCOMING BEAMS PARAMETER
+#------------------------------------------------
+ih1         1      ! hadron 1 (1 for protons, -1 for antiprotons)
+ih2         1      ! hadron 2 (1 for protons, -1 for antiprotons)
+ebeam1 6500d0      ! energy of beam 1
+ebeam2 6500d0      ! energy of beam 2
+
+
+#------------------------------------------------
+#   PDF & ALPHAS SETTINGS
+#------------------------------------------------
+#   To be set only if using LHA pdfs
+lhans1             303400       ! pdf set for hadron 1 (LHA numbering)
+lhans2             303400       ! pdf set for hadron 2 (LHA numbering)
+#   To be set only if using different pdf sets for the two incoming hadrons
+#QCDLambda5        0.25         ! for not equal pdf sets
+#   ALPHAS AND PDF EVOLUTION
+alphas_from_pdf  1            ! (default 0) if 1, uses alphas from PDF evolution tool (e.g. lhapdf or hoppet)
+#   PDF THRESHOLDS
+#charmthrpdf        1.2750000d0
+#bottomthrpdf       4.1799998d0
+ewscheme         1  ! 1 -> Gf, MZ, MW scheme, 2 -> alpha, MZ, MW scheme
+
+#------------------------------------------------
+#   RENORMALIZATION/FACTORIZATION SCALE SETTINGS
+#------------------------------------------------
+# IMPLEMENT SCALES
+fixedscale      1   ! 0 = dynamic -> muren = mufac = M(WW); 1 = fixed -> muren = mufac = MW
+#dynamicalscale 2   ! 1 = XXX, 2 = XXX
+#runningscales  0   ! 0 = fixed scale (leave this to 0 when MiNLO is used.
+#                   ! All scale settings is taken care of internally)
+
+#------------------------------------------------
+#   PROCESS PARAMETERS
+#------------------------------------------------
+whichcuts             2  ! whichcuts = 1: inclusive cuts, whichcuts = 2: fiducial cuts (default), whichcuts = 3: same as fiducial, but with same cuts for neutrinos as for charged leptons
+mem_type              2  ! Select the type of weights used in the MEM  observables:
+                         ! mem_type = 1;    reweighting
+                         ! mem_type = 2;    weights from btilde taking into account the specific real momentum
+                         ! mem_type = 3;    weights from bbar integrating over the real momentum
+                         ! mem_type = else; LO matrix elements from momenta as done so far
+rwgt                  0  ! 'Reweight' to the MEM weight in a POWHEG way but with the weights gotten as specified by mem_type.
+                         ! This is only relevant for the btilde and bbar weights.
+LOevents              0  ! If set to 1, bornonly is set to 1 AND no radiation is generated in stage 3 and 4. Thus, one gets LO events in the end without any extra radiation.
+mem_random_flavour    1  ! Pick flavour structure of the initial state randomly for mem_type=2, in the hadronic case.
+
+NSMtoNBSM            -1  ! Ratio NSM/NBSM  for the nearly perfect observable. (-1 -> Use the values inferred from xsec set below.)
+NInttoNBSM           -1  ! Ratio NInt/NBSM for the nearly perfect observable. (-1 -> Use the values inferred from xsec set below.)
+
+# Cross sections used in the normalisation of P_{SM, BSM, Int}
+# The following values are gotten after the LHEF analysis.
+xsecPlusSM           0.14372688D+00 ! SM cross section for positive SM/ BSM interference.
+xsecPlusBSM          0.20960659D-01 ! BSM cross section for positive SM/ BSM interference.
+xsecPlusInt          0.25551280D-02  ! SM/ BSM interference cross section for positive SM/ BSM interference.
+xsecMinusSM          0D00 ! SM cross section for negative SM/ BSM interference.
+xsecMinusBSM         0D00 ! BSM cross section for negative SM/ BSM interference.
+xsecMinusInt         0D00 ! SM/ BSM interference cross section for negative SM/ BSM interference.
+# The following values are gotten after the shower.
+!xsecPlusSM           0.13791640D+00 ! SM cross section for positive SM/ BSM interference.
+!xsecPlusBSM          0.20031342D-01 ! BSM cross section for positive SM/ BSM interference.
+!xsecPlusInt          0.25394478D-02 ! SM/ BSM interference cross section for positive SM/ BSM interference.
+!xsecMinusSM          0D00 ! SM cross section for negative SM/ BSM interference.
+!xsecMinusBSM         0D00 ! BSM cross section for negative SM/ BSM interference.
+!xsecMinusInt         0D00 ! SM/ BSM interference cross section for negative SM/ BSM interference.
+# If they are not specified, the Monte Carlo integral of the weights given by mem_type is used to calculate them.
+# They can be specified by the optimal value gotten from selecting mem_type=1, i.e. POWHEGs reweighting and looking
+# for `total-crosssection-pos` and `total-crosssection-neg` in the corresponding .top files.
+# Thus, do 1. a run creating the .lhe events. Second, do MEM with reweighting and take the positive/ negative interference
+# cross section as input for the later runs. Third, do the proper MEM runs with the just gotten values as input for mem_type=2.
+
+real_momentum_method  2  ! 0=LHE record, 1=hardest jet, 2=momentum conservation + random y, 3=recoil sum (to be fixed), 4=Get the real momentum from "random number generator" (.btl files needed).
+
+
+# Decay channels of the two W bosons (turn multiple of the following to 1 to allow multiple decay channels)
+semileptonic    0  ! one W goes to hadrons, one goes to leptons
+e+e-            1  ! only electrons
+mu+mu-          0  ! only muons
+tau+tau-        0  ! only taus
+leptonic        0  ! both W’s go into leptons
+hadronic        0  ! both W’s go into hadrons
+
+# Analysis: Decay choices for Ws ( only +-11, +-13, +-15 allowed
+vdecaymodeWp    -11  ! W decays into e+
+vdecaymodeWm     11  ! W decays into e-
+
+# Anomalous couplings (see section 3.2 of ArXiv 1107.5051), default 0:
+# Note that in POWHEG, these couplings are independent of one another.
+# If there are any relations (e.g. due to symmetry considerations) between couplings,
+# these should be calculated independently and the input set accordingly.
+#delg1_z     1d0  !
+#delg1_g     XXX  !
+#lambda_g    XXX  !
+lambda_z    0.06d0  !
+#delk_g      XXX  !
+#delk_z      XXX  !
+tevscale    1d0  !
+
+unitarity_factor 0  ! 0: Turn off unitarity form factor F(s) = 1 / (1 + s/Λ^2)^2.
+
+# Flags to turn on and off stuff like the SM, BSM or interference contribution in the amplitudes
+smcontribution  1  ! 1 to include SM contribution (default 1)
+bsmcontribution 1  ! 1 to include BSM contribution (default 1)
+intcontribution 1  ! 1 to include interference contribution (default 1)
+
+# Flags to consider just the t-channel or s-channel contributions in the amplitudes
+#noschannel 1  ! 1 turns s-channel contribtions off (default 0)
+#notchannel 1  ! 1 turns t-channel contribtions off (default 0)
+
+
+#------------------------------------------------
+#   Generation cuts
+#------------------------------------------------
+#bornktmin        0.26d0   ! Generation cut; minimum kt in underlying born
+#mll_min          60d0     ! minimum invariant mass on each intermediate Z boson/photon (required to avoid photon singularity)
+#mll_max         120d0     ! maximum invariant mass on each intermediate Z boson/photon
+
+
+#------------------------------------------------
+#   Analysis cuts
+#------------------------------------------------
+
+
+#------------------------------------------------
+#   Jet definition
+#------------------------------------------------
+
+
+#---------------------------------------------------
+#   POWHEG PARAMETERS: Monte Carlo Integration
+#---------------------------------------------------
+#   Parameters to allow or not the use of stored data
+use-old-grid        1     ! if 1 use old grid if file pwggrids.dat is present (<> 1 regenerate)
+#   General MC Integration settings
+ncall1         500     ! number of calls for initializing the integration grid
+itmx1               1     ! number of iterations for initializing the integration grid
+#fakevirt            1     ! If 1, using Born in the grid generation instead of virtual. 0 when using the virtual.
+ncall2         500     ! number of calls for computing the integral and finding upper bound
+itmx2               2     ! number of iterations for computing the integral and finding upper bound
+foldcsi             1     ! number of folds on csi integration
+foldy               1     ! number of folds on  y  integration
+foldphi             1     ! number of folds on phi integration
+testplots           1     ! (default 0, do not) do NLO and PWHG distributions
+
+
+iseed          16665  ! initialize random number sequence
+rand1             -1  ! initialize random number sequence
+rand2             -1  ! initialize random number sequence
+#-----------------------------------------------------
+#   POWHEG PARAMETERS: Upper bound  evaluation
+#-----------------------------------------------------
+use-old-ubound      1    ! if 1 use norm of upper bounding function stored in pwgubound.dat, if present; <> 1 regenerate
+nubound        500    ! number of bbarra calls to setup norm of upper bounding function
+storemintupb        1    ! Improve upper bounding computation
+xupbound          2d0    ! increase upper bound for radiation generation
+mintupbratlim     1d3
+#compress_upb        1
+ubexcess_correct    1
+
+
+#---------------------------------------------------
+#   POWHEG PARAMETERS: Event generation
+#---------------------------------------------------
+numevts       10    ! number of events to be generated
+#compress_lhe       1
+#   To correct for UB violations detected during stage 4
+#btildeviol         1
+!corr_btilde      XXX
+!corr_remnant     XXX
+
+
+#------------------------------------------------
+#   PARTON SHOWER PARAMETERS
+#   (Settings for shower with pythia8)
+#------------------------------------------------
+pythiamatching 2   ! Pythias matching strategy (2 = Set ISR and FSR to start at the kinematical limit)
+py8tune       21   ! (default 14) tune for pythia8 (14 -> Monash2013 tune)
+nohad          1   ! (default 1) if 1 switch off hadronization
+noMPI          1   ! Turn off multi particle interactions.
+noQED          1   ! Turn off QED shower.
+nobeamremnants 0   ! Turn off beam remnant, hadronization and FSR (Only for testing!).
+
+savelhe        0   ! (default 1) if 1 save the showered events.
+
+
+#------------------------------------------------
+#   SCALE VARIATION & REWEIGHTING
+#------------------------------------------------
+renscfact      1d0          ! (default 1d0) ren scale factor: muren  = muref * renscfact
+facscfact      1d0   	    ! (default 1d0) fac scale factor: mufact = muref * facscfact
+storeinfo_rwgt 1   	    ! store info to allow for reweighting
+rwl_format_rwgt 1
+
+rwl_file '-'
+<initrwgt>
+<weightgroup name='MEM'>
+<weight id='all'>     smcontribution=1 bsmcontribution=1 intcontribution=1 lambda_z=0.1 </weight>
+<weight id='SM'>      smcontribution=1 bsmcontribution=0 intcontribution=0 lambda_z=0.1 </weight>
+<weight id='BSM'>     smcontribution=0 bsmcontribution=1 intcontribution=0 lambda_z=0.1 </weight>
+<weight id='Int'>     smcontribution=0 bsmcontribution=0 intcontribution=1 lambda_z=0.1 </weight>
+<weight id='IntSign'> smcontribution=0 bsmcontribution=0 intcontribution=1 lambda_z=0.1 bornonly=1 </weight>
+</weightgroup>
+<weightgroup name='BSM'>
+<weight id='lambda_z=0'>         lambda_z=0       </weight>
+<weight id='lambda_z=0.001'>     lambda_z=0.001   </weight>
+<weight id='lambda_z=0.00316'>   lambda_z=0.00316 </weight>
+<weight id='lambda_z=0.01'>      lambda_z=0.01    </weight>
+<weight id='lambda_z=0.06'>      lambda_z=0.06    </weight>
+<weight id='lambda_z=0.0316'>    lambda_z=0.0316  </weight>
+<weight id='lambda_z=0.1'>       lambda_z=0.1     </weight>
+<weight id='lambda_z=0.316'>     lambda_z=0.316   </weight>
+<weight id='lambda_z=1'>         lambda_z=1       </weight>
+<weight id='lambda_z=0.06 born'> lambda_z=0.06    bornonly=1 </weight>
+</weightgroup>
+</initrwgt>
+
+#------------------------------------------------
+#   Physical Inputs
+#------------------------------------------------
+zmass   91.188d0
+zwidth   2.4955d0
+wmass   80.369d0
+wwidth   2.085d0
+
+tmass  172.69d0
+twidth   0.0d0
+hmass  125.25d0
+hwidth   0.0d0
+
+! Massless leptons
+e_mass   0.0d0
+mu_mass   0.0d0
+tau_mass  0.0d0
+
+gfermi 1.1663788d-5
+complexGFermi 0d0
+
+#---------------------------------------------------
+#   Soft/Collinear limit TESTS
+#---------------------------------------------------
+#    Check soft/coll limits -> Just for debugging
+verytinypars      0         ! tiny values of 1d-10 for parameters controlling how close we get
+                            ! to soft/coll limits -> values used throughout the program
+colltest          0
+softtest          0
+#tinyForLims      1d-10     ! Set these parameters to tiny values only for soft/coll limit checks
+
+
+#------------------------------------------------
+#   BORN/REMNANT SUPPRESSION
+#------------------------------------------------
+bornsuppfact  0   ! (default 1), If 1 the Born suppression factor is included.
+#                 ! Weighted events are generated. If 0 no suppression
+#                 ! factor is included, and events are unweighted.
+#                 ! The pt used for the suppresssion is the total pt of both
+#                 ! W bosons.
+withdamp      0  ! Split real amplitude into a singular and remnant contribution
+#bornzerodamp  1
+
+
+#------------------------------------------------
+#   OPTIMIZATION OPTIONS
+#------------------------------------------------
+smartsig      0   ! (default 1) remember equal amplitudes (0 do not remember)
+fastbtlbound  1
+#bornonly      0   ! (default 0) if 1 do Born only
+
+
+#dronly 0        ! default 0; if 1 only double resonant contributions
+#zerowidth 1     ! default 0 (offshell Ws); if 1 use on-shell W-bosons only
+#runningwidth    ! default 0; if 1 use running width
+
+#------------------------------------------------
+#   OPTIONS TO CATCH INSTABILITIES
+#------------------------------------------------
+check_bad_st1 1  ! (default 0) if 1, takes care of removing bad grids during stage 1
+check_bad_st2 1  ! (default 0) if 1, takes care of removing bad grids during stage 2
+
+
+#------------------------------------------------
+#   PARALLEL RUNS
+#------------------------------------------------
+#   The following is for parallel runs (see manual in Z2jet/Docs/)
+# Used to perform multiple runs with different random seeds in the same directory.
+# If set to 1, the program asks for an integer j; The file pwgseeds.dat at line j is read, and the
+# integer at line j is used to initialize the random sequence for the generation of the event.
+# The event file is called pwgevents-'j'.lhe
+manyseeds           1
+parallelstage       1
+xgriditeration      1
+maxseeds         5000

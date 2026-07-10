@@ -1,0 +1,14 @@
+# Raven Cluster Configuration
+# HPC cluster with multi-node MPI
+cluster_name: raven
+
+# Resource defaults
+default_partition: general
+tasks_per_node: 72
+max_nodes: 768
+
+# SLURM configuration/ limits
+slurm:
+  time_limit: "24:00:00"
+  max_parallel_jobs: 500
+
