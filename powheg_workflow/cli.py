@@ -6,6 +6,7 @@ This CLI provides workflow orchestration for POWHEG using b2luigi.
 
 Usage:
     powheg-workflow -c config.yaml                          # Run full workflow
+    powheg-workflow -c config1.yaml config2.yaml            # Run multiple workflows
     powheg-workflow -c config.yaml --dry-run                # Show what would be done
 """
 
@@ -38,8 +39,9 @@ Examples:
     parser.add_argument(
         '-c', '--config_file',
         metavar='config.yaml',
-        default=None,
-        help='Path to config.yaml configuration file'
+        nargs='+',
+        default=[],
+        help='Path to one or more config.yaml configuration files'
     )
 
     parser.add_argument(
@@ -63,16 +65,15 @@ Examples:
     return parser
 
 
-def set_b2luigi_settings(cwd: Path, run_dir: Path, config_file: Path):
+def set_b2luigi_settings(cwd: Path, run_dir: Path):
     """
     Set b2luigi settings based on the configuration.
 
     Args:
         cwd (Path): Directory where the workflow is started.
         run_dir (Path): Directory where POWHEG run will run.
-        config_file (Path): Path to the configuration file for this POWHEG run.
     """
-    cwd, run_dir, config_file = Path(cwd), Path(run_dir), Path(config_file)
+    cwd, run_dir = Path(cwd), Path(run_dir)
     b2luigi.set_setting("result_dir", str(run_dir))
     b2luigi.set_setting("env_script", str(run_dir / "bootstrap.sh"))
     # Directory where slurm scripts will be stored.
@@ -82,16 +83,20 @@ def set_b2luigi_settings(cwd: Path, run_dir: Path, config_file: Path):
     b2luigi.set_setting("working_dir", str(cwd))
 
     # FIXME:
-    b2luigi.set_setting("executable", ["/u/jlinder/utilities/powheg-luigi-workflow/.venv/bin/powheg-workflow"])  # Use our CLI as the executable for tasks
-    b2luigi.set_setting("add_filename_to_cmd", False)
-    # Give the config file to each task as an argument
-    b2luigi.set_setting("task_cmd_additional_args", ["--config_file", str(config_file)])  # No additional args for tasks
+    # b2luigi.set_setting("executable", ["/u/jlinder/utilities/powheg-luigi-workflow/.venv/bin/powheg-workflow"])  # Use our CLI as the executable for tasks
 
-# TODO: Try out how the scanning over different config files is working.
+    b2luigi.set_setting("executable_prefix", ["python",])  # Use our CLI as the executable for tasks
+    this_file_path = Path(__file__).resolve()
+    main_file = this_file_path.parent.parent / "please_work.py"
+    b2luigi.set_setting("executable", [f"{main_file}"])  # Use our CLI as the executable for tasks
+    b2luigi.set_setting("add_filename_to_cmd", False)
+    # Give the config file to each task as an argument (Done now in the task_cmd_additional_args property of POWHEGStage.)
+    # b2luigi.set_setting("task_cmd_additional_args", ["--config_file", str(config_file)])  # No additional args for tasks
+
 
 def run_workflow():
     """Main entry point for the CLI - parses arguments and runs the workflow."""
-    from .tasks import POWHEGWorkflow
+    from .tasks import POWHEGWorkflow, POWHEGWorkflow_multiple_configs
 
     # Parse custom arguments while ignoring b2luigi batch-runner arguments.
     parser = create_parser()
@@ -106,45 +111,67 @@ def run_workflow():
     else:
         print(f"Start powheg-workflow ({__version__})")
 
+    config_files = [Path(config_file).resolve() for config_file in args.config_file]
+    if not config_files:
+        parser.error("the following arguments are required: -c/--config_file")
 
-    config = POWHEGConfig.from_yaml(args.config_file)
-    # Validate run directory
-    config.validate_run_directory()
+    configs = [POWHEGConfig.from_yaml(config_file) for config_file in config_files]
+    for config in configs:
+        config.validate_run_directory()
+
+    primary_config   = configs[0]
+    multiple_configs = len(configs) > 1
 
     if args.verbose:
-        print(f"Configuration: {config['config_file']}")
+        if multiple_configs:
+            print("Configurations:")
+            for config in configs:
+                print(f"  - {config['config_file']}")
+        else:
+            print(f"Configuration: {primary_config['config_file']}")
 
     if args.dry_run:
         print(f"\nDry run - would execute:")
-        print(f"  Config:   {config['config_file']}")
-        print(f"  Cluster:  {config.get('cluster', 'mpi')}")
-        print(f"\nEnabled stages:")
-        for stage, settings in config.get('stages', {}).items():
-            if isinstance(settings, dict) and settings.get('enabled', False):
-                print(f"  - {stage}")
-            elif settings is True:
-                print(f"  - {stage}")
-        # return 0
+        for config in configs:
+            print(f"  Config:   {config['config_file']}")
+            print(f"  Cluster:  {config.get('cluster', 'mpi')}")
+            print(f"  Enabled stages:")
+            for stage, settings in config.get('stages', {}).items():
+                if isinstance(settings, dict) and settings.get('enabled', False):
+                    print(f"    - {stage}")
+                elif settings is True:
+                    print(f"    - {stage}")
+            print()
         b2luigi_args.append('--dry-run')  # Pass dry-run to b2luigi
-
-
-    set_b2luigi_settings(cwd = config["cwd"],
-                         run_dir = config["job_settings"]["run_dir"],
-                         config_file = config["config_file"])
 
     # Update sys.argv for b2luigi, removing our custom arguments
     sys.argv = b2luigi_args
 
 
     # number of workers == number of parallel tasks to run.
-    try:
-        max_workers = config["cluster_config"]["slurm"]["max_parallel_jobs"]
-    except KeyError:
-        max_workers = config["cluster_config"]["local"]["max_parallel_jobs"]
+    def get_max_workers(config):
+        try:
+            return config["cluster_config"]["slurm"]["max_parallel_jobs"]
+        except KeyError:
+            return config["cluster_config"]["local"]["max_parallel_jobs"]
+
+    max_workers = max(get_max_workers(config) for config in configs)
 
     program_version = __version__.replace('.', '-')  # Replace . with hyphen for environment variable compatibility
-    config_dict = config.to_dict()  # Convert to dictionary for serialization
+    config_dict     = primary_config.to_dict()  # Convert to dictionary for serialization
+
+    if multiple_configs:
+        workflow = POWHEGWorkflow_multiple_configs(
+                        version             = program_version,
+                        configuration_files = [str(config_file) for config_file in config_files],
+                    )
+
+    else:
+        set_b2luigi_settings(cwd        = primary_config["cwd"],
+                            run_dir     = primary_config["job_settings"]["run_dir"])
+        workflow = POWHEGWorkflow(version=program_version, config=config_dict)
+
     # Run tasks using b2luigi with ignore_additional_command_line_args=True
-    b2luigi.process(POWHEGWorkflow(version=program_version, config=config_dict), workers=max_workers, ignore_additional_command_line_args=True, dry_run=args.dry_run)
+    b2luigi.process(workflow, workers=max_workers, ignore_additional_command_line_args=True, dry_run=args.dry_run)
 
     return 0

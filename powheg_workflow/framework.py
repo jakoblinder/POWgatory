@@ -94,7 +94,10 @@ class POWHEGBaseTask(Task):
         description="Grid iteration number (1, 2, 3, ...)"
     )
 
-    config = b2luigi.DictParameter(hashed=True, description="POWHEG configuration dictionary")
+    config = b2luigi.DictParameter(hashed=True,
+                                   default={},
+                                   description="POWHEG configuration dictionary",
+                                  )
 
     def __repr__(self):
         """
@@ -270,7 +273,10 @@ class POWHEGWrapper_template(b2luigi.WrapperTask):
         hashed=True
     )
 
-    config = b2luigi.DictParameter(hashed=True, description="POWHEG configuration dictionary")
+    config = b2luigi.DictParameter(hashed=True,
+                                   default={},
+                                   description="POWHEG configuration dictionary"
+                                  )
 
     @staticmethod
     def get_stage_str(stage_number: int) -> str:

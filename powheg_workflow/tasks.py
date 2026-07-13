@@ -25,6 +25,8 @@ from typing import Dict, Any, Optional, List
 
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapper_template
+from .config import POWHEGConfig
+from .cli import set_b2luigi_settings
 
 
 class POWHEGStageSetup(POWHEGBaseTask):
@@ -251,6 +253,14 @@ class POWHEGStage(POWHEGBaseTask):
     )
 
     @property
+    def task_cmd_additional_args(self) -> List[str]:
+        """
+        Additional command-line arguments for the task.
+        Necessary for the batch submission.
+        """
+        return ["--config_file", str(self.config["config_file"])]  # Pass config file to each task
+
+    @property
     def batch_system(self) -> str:
         if self.config["stages"][self.stage]["resources"]["cluster"] == "local":
             return "local"
@@ -258,7 +268,7 @@ class POWHEGStage(POWHEGBaseTask):
 
     @property
     def job_name(self) -> str:
-        return f"POWHEG_{self.stage_name}_s{self.branch_id}"
+        return f"{self.config['job_settings']['job_name']}_{self.stage_name}_s{self.branch_id}"
 
     @property
     def slurm_settings(self) -> Dict[str, Any]:
@@ -446,3 +456,17 @@ class POWHEGWorkflow(POWHEGWrapper_template):
             max_grid_iterations = stages_config["stage1"]["grid_iterations"]
             yield POWHEGStageWrapper(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
 
+
+class POWHEGWorkflow_multiple_configs(POWHEGWrapper_template):
+    configuration_files = b2luigi.ListParameter(hashed=True, description="List of POWHEG configuration files to run.")
+
+    def requires(self):
+        for config_file in self.configuration_files:
+            config = POWHEGConfig.from_yaml(config_file)
+
+            set_b2luigi_settings(cwd         = config["cwd"],
+                                 run_dir     = config["job_settings"]["run_dir"])
+
+            config_dict = config.to_dict()  # Convert to dictionary for serialization
+
+            yield POWHEGWorkflow(version=self.version, config=config_dict)
