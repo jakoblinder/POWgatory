@@ -25,6 +25,10 @@ job_settings:
   #   - Local path: "/path/to/powheg.sif" or "./powheg.sif"
   #   - Empty/omit: run directly without container
   container_image: "oras://gitlab-registry.mpcdf.mpg.de/mpp/containers/jlinder/powheg:powheg-latest"
+  # Script to be run before POWHEGWorkflow is started.
+  # For a POWHEGWorkflow_multiple_configs this script is run once per config file.
+  # It is run in the workflow submission directory (cwd) and not the run_dir.
+  presubmit: ""
 
 # ============================================================================
 # STAGES TO RUN

@@ -8,15 +8,10 @@ This module implements the POWHEG workflow using b2luigi (BELLE2 Luigi):
 - Container execution via b2luigi
 """
 
-import sys
-
 import b2luigi
-import luigi
-import yaml
 import os
 import re
 import time
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -27,6 +22,50 @@ from typing import Dict, Any, Optional, List
 from .framework import POWHEGBaseTask, POWHEGWrapper_template
 from .config import POWHEGConfig
 from .cli import set_b2luigi_settings
+
+
+class POWHEGPresubmit(POWHEGBaseTask):
+    """
+    Presubmit task to run a user-defined script before the workflow starts.
+    This can be used for environment setup, data preparation, or any other pre-processing steps.
+
+    It is run in the run_dir specified in the configuration and is executed before any other tasks in the workflow.
+    """
+
+    batch_system = "local"
+
+    @property
+    def stage_name(self) -> str:
+        return "presubmit"
+
+    def output(self):
+        """Task completion marker."""
+        return self.local_target("presubmit.done")
+
+    def run(self):
+        """Execute the presubmit script if defined."""
+        presubmit_script = self.config["job_settings"]["presubmit"]
+        if presubmit_script:
+            self.publish_message(f"Running presubmit script: {presubmit_script}")
+            try:
+                subprocess.run(
+                    presubmit_script,
+                    shell=True,
+                    cwd=self.config['job_settings']['run_dir'],
+                    check=True
+                )
+
+                # Mark complete
+                with self.output().open('w') as f:
+                    f.write(f"{self.stage_name}: Completed.\n")
+
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"Presubmit script failed: {e}")
+        else:
+            self.publish_message("No presubmit script defined. Skipping.")
+            # Mark complete
+            with self.output().open('w') as f:
+                f.write(f"{self.stage_name}: No presubmit script defined. Skipping..\n")
 
 
 class POWHEGStageSetup(POWHEGBaseTask):
@@ -58,6 +97,10 @@ class POWHEGStageSetup(POWHEGBaseTask):
         self.create_powheg_input(stage=self.stage, grid=self.grid_iteration)
 
         # self.get_scripts()
+
+    def requires(self):
+        """Depend on presubmit task."""
+        yield POWHEGPresubmit(version=self.version, config=self.config)
 
     def create_powheg_input(self, stage:str, grid: int = 1):
         """
@@ -303,7 +346,7 @@ class POWHEGStage(POWHEGBaseTask):
 
     @property
     def __name__(self):
-        return f"POWHEG_{self.stage_name}"
+        return f"{self.config['job_settings']['job_name']}_{self.stage_name}"
 
     def requires(self):
         """Depend on setup task for this grid iteration."""

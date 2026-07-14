@@ -83,12 +83,13 @@ def set_b2luigi_settings(cwd: Path, run_dir: Path):
     b2luigi.set_setting("working_dir", str(cwd))
 
     # FIXME:
-    # b2luigi.set_setting("executable", ["/u/jlinder/utilities/powheg-luigi-workflow/.venv/bin/powheg-workflow"])  # Use our CLI as the executable for tasks
+    #b2luigi.set_setting("executable", ["/ptmp/mpp/jlinder/.powrun/bin/powgatory"])  # Use our CLI as the executable for tasks
 
     b2luigi.set_setting("executable_prefix", ["python",])  # Use our CLI as the executable for tasks
     this_file_path = Path(__file__).resolve()
     main_file = this_file_path.parent.parent / "please_work.py"
     b2luigi.set_setting("executable", [f"{main_file}"])  # Use our CLI as the executable for tasks
+
     b2luigi.set_setting("add_filename_to_cmd", False)
     # Give the config file to each task as an argument (Done now in the task_cmd_additional_args property of POWHEGStage.)
     # b2luigi.set_setting("task_cmd_additional_args", ["--config_file", str(config_file)])  # No additional args for tasks
