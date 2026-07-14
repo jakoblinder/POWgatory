@@ -369,13 +369,47 @@ class POWHEGStage(POWHEGBaseTask):
             yield POWHEGStageWrapper(stage=self.get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
 
     def output(self):
-        """Task completion marker."""
+        """
+        Output targets for POWHEG execution:
+            For stage 1, there are two possible outputs:
+            The xgrid 'pwg-xg?-xgrid-btl-????.dat' file and the statistics 'pwg-????-xg?-stat.dat' file.
+            Depending on the implementation (ggHH does weird stuff here) 'pwggridinfo-[btl|rmn]-xg?-?.dat'
+            files are produced instead.
+
+            # FIXME: Do we always have a rmn file for which we should check?
+
+            For stage 2 to 4, we use the single 'pwgcounters-st?-????.dat' file, which is always produced
+            and especially produced after having a finished event file.
+            We check, however, for the event file 'pwgevents-????.lhe' as well, which is produced in stage 4.
+
+        Returns:
+            List[List]: Output targets for this task. Each inner list represents a possible set of files that are considered as
+                        outputs for the task.
+
+        """
         if self.stage_number == 1:
-            yield self.local_target(f"pwg-xg{self.grid_iteration}-xgrid-btl-{self.branch_id:04d}.dat")
-            yield self.local_target(f"pwg-{self.branch_id:04d}-xg{self.grid_iteration}-stat.dat")
+            return [
+                [self.local_target(f"pwg-xg{self.grid_iteration}-xgrid-btl-{self.branch_id:04d}.dat"),
+                 self.local_target(f"pwg-{self.branch_id:04d}-xg{self.grid_iteration}-stat.dat"),],
+                #
+                [self.local_target(f"pwggridinfo-btl-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),
+                 self.local_target(f"pwggridinfo-rmn-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),],
+            ]
         else:
-            yield self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat")
-            # return self.local_target(f"task_{self.stage_name}_{self.branch_id}.done")
+            return [
+                [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),
+                 self.local_target(f"pwgevents-{self.branch_id:04d}.lhe"),],
+            ]
+
+    def complete(self):
+        """Treat stage as complete when one of the possible sets of output targets exists."""
+        output = self.output()
+
+        for target_set in output:
+            if all(target.exists() for target in target_set):
+                return True
+
+        return False
 
     def run(self):
         """Execute one task of Stage 1."""
