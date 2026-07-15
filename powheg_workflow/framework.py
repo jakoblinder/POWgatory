@@ -112,6 +112,14 @@ class POWHEGBaseTask(Task):
         # Build up task id
         repr_parts = []
         param_objs = dict(params)
+        # Avoid printing of 'grid_iteration' parameter for stages != 1:
+        # grid_iteration_stage True for grid iteration stage.
+        grid_iteration_stage = False
+        for param_name, param_value in param_values:
+            if param_name == "stage" and param_value == "stage1":
+                grid_iteration_stage = True
+                break
+
         for param_name, param_value in param_values:
             if param_objs[param_name].significant:
                 if param_name == "config":
@@ -120,6 +128,8 @@ class POWHEGBaseTask(Task):
                     # Express the config file path relative to the current working directory for better readability
                     config_file = config_file.relative_to(Path(self.config["cwd"]))
                     repr_parts.append(f"{param_name:s}={str(config_file):s}")
+                elif param_name == "grid_iteration" and not grid_iteration_stage:
+                    continue
                 elif param_name == "version":
                     continue  # Skip version in the representation, since its printed once at the beginning of the workflow
                 else:
