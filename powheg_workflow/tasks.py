@@ -542,7 +542,8 @@ class POWHEGWorkflow_multiple_configs(POWHEGWrapper_template):
             config = POWHEGConfig.from_yaml(config_file)
 
             set_b2luigi_settings(cwd         = config["cwd"],
-                                 run_dir     = config["job_settings"]["run_dir"])
+                                 run_dir     = config["job_settings"]["run_dir"],
+                                 python      = config["python"])
 
             config_dict = config.to_dict()  # Convert to dictionary for serialization
 

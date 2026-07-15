@@ -3,7 +3,6 @@
 POWHEG-BOX LAW Workflow configuration file manager
 
 """
-import json
 from pathlib import Path
 import os
 import yaml
@@ -29,6 +28,11 @@ class POWHEGConfig:
             # Put the directory where the workflow is run into the config, so that tasks can use it.
             # Do it only ones so that if its part of the config file, it is not overwritten.
             self.config["cwd"] = Path.cwd()
+
+        if "python" not in self.config:
+            # Put the path to the python executable into the config, so that tasks can use it.
+            # Do it only ones so that if its part of the config file, it is not overwritten.
+            self.config["python"] = Path(sys.executable)
 
 
         # Make sure powheg_executable, powheg_input_template, and powheg_seeds_template are absolute paths
@@ -154,7 +158,7 @@ class POWHEGConfig:
         """Return the configuration dictionary."""
         output_dict = self.config.copy()
         # Convert Path objects to strings for serialization
-        for key in ["powheg_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "config_dir", "cwd"]:
+        for key in ["powheg_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "config_dir", "cwd", "python"]:
             if key in output_dict:
                 output_dict[key] = str(output_dict[key])
         for key in ["run_dir", "log_dir"]:

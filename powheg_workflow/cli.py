@@ -65,7 +65,7 @@ Examples:
     return parser
 
 
-def set_b2luigi_settings(cwd: Path, run_dir: Path):
+def set_b2luigi_settings(cwd: Path, run_dir: Path, python: Path):
     """
     Set b2luigi settings based on the configuration.
 
@@ -73,7 +73,7 @@ def set_b2luigi_settings(cwd: Path, run_dir: Path):
         cwd (Path): Directory where the workflow is started.
         run_dir (Path): Directory where POWHEG run will run.
     """
-    cwd, run_dir = Path(cwd), Path(run_dir)
+    cwd, run_dir, python = Path(cwd), Path(run_dir), Path(python)
     b2luigi.set_setting("result_dir", str(run_dir))
     b2luigi.set_setting("env_script", str(run_dir / "bootstrap.sh"))
     # Directory where slurm scripts will be stored.
@@ -82,13 +82,14 @@ def set_b2luigi_settings(cwd: Path, run_dir: Path):
     # Directory from which to run the workflow; this should be absolute to avoid issues with relative paths in batch systems
     b2luigi.set_setting("working_dir", str(cwd))
 
-    # FIXME:
-    #b2luigi.set_setting("executable", ["/ptmp/mpp/jlinder/.powrun/bin/powgatory"])  # Use our CLI as the executable for tasks
+    # Make sure the python executable is used for tasks which was used to run the workflow.
+    # This is important if virtual environments in combination with batch jobs are used.
+    # Alternatively the virtual environment could be activated in the bootstrap.sh script.
+    b2luigi.set_setting("executable_prefix", [str(python),])
 
-    b2luigi.set_setting("executable_prefix", ["python",])  # Use our CLI as the executable for tasks
     this_file_path = Path(__file__).resolve()
-    main_file = this_file_path.parent.parent / "please_work.py"
-    b2luigi.set_setting("executable", [f"{main_file}"])  # Use our CLI as the executable for tasks
+    main_file      = this_file_path.parent.parent / "please_work.py"
+    b2luigi.set_setting("executable", [str(main_file),])
 
     b2luigi.set_setting("add_filename_to_cmd", False)
     # Give the config file to each task as an argument (Done now in the task_cmd_additional_args property of POWHEGStage.)
@@ -169,7 +170,8 @@ def run_workflow():
 
     else:
         set_b2luigi_settings(cwd        = primary_config["cwd"],
-                            run_dir     = primary_config["job_settings"]["run_dir"])
+                             run_dir    = primary_config["job_settings"]["run_dir"],
+                             python     = primary_config["python"])
         workflow = POWHEGWorkflow(version=program_version, config=config_dict)
 
     # Run tasks using b2luigi with ignore_additional_command_line_args=True
