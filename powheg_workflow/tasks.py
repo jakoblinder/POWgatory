@@ -395,10 +395,14 @@ class POWHEGStage(POWHEGBaseTask):
                 [self.local_target(f"pwggridinfo-btl-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),
                  self.local_target(f"pwggridinfo-rmn-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),],
             ]
-        else:
+        elif self.stage_number == 4:
             return [
                 [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),
                  self.local_target(f"pwgevents-{self.branch_id:04d}.lhe"),],
+            ]
+        else:
+            return [
+                [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),],
             ]
 
     def complete(self):
