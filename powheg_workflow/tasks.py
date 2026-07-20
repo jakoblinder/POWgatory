@@ -239,15 +239,15 @@ class POWHEGcreateSymlinks(POWHEGBaseTask):
         )
         if self.stage_number == 1 and self.grid_iteration > 1:
             # Depend on previous grid iteration for Stage 1
-            yield POWHEGStageWrapper(stage=self.get_stage_str(1), grid_iteration=self.grid_iteration - 1, version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=self.grid_iteration - 1, version=self.version, config=self.config)
         elif self.stage_number == 2:
             # Depend on Stage 1 for Stage 2
-            stages_config    = self.config['stages']
+            stages_config       = self.config['stages']
             max_grid_iterations = stages_config['stage1'].get('grid_iterations', 3)
-            yield POWHEGStageWrapper(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
         elif self.stage_number > 2:
             # Depend on previous stage for stage > 2
-            yield POWHEGStageWrapper(stage=self.get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=self.get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
 
 
     def create_symlinks(self, stage: str, grid: int = -1):
@@ -371,15 +371,15 @@ class POWHEGStage(POWHEGBaseTask):
 
         if self.stage_number == 1 and self.grid_iteration > 1:
             # Depend on previous grid iteration for Stage 1
-            yield POWHEGStageWrapper(stage=self.get_stage_str(1), grid_iteration=self.grid_iteration - 1, version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=self.grid_iteration - 1, version=self.version, config=self.config)
         elif self.stage_number == 2:
             # Depend on Stage 1 for Stage 2
             stages_config       = self.config['stages']
             max_grid_iterations = stages_config['stage1'].get('grid_iterations', 3)
-            yield POWHEGStageWrapper(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
         elif self.stage_number > 2:
             # Depend on previous stage for stage > 2
-            yield POWHEGStageWrapper(stage=self.get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=self.get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
 
     def output(self):
         """
@@ -668,12 +668,11 @@ class POWHEGWorkflow(POWHEGWrapper_template):
         else:
             highest_stage = 0
 
-        for stage_number in range(1, highest_stage + 1):
-            if stage_number == 1:
-                grid_iteration = stages_config["stage1"]["grid_iterations"]
-                yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=grid_iteration, version=self.version, config=self.config)
-            else:
-                yield POWHEGStageTimings(stage=self.get_stage_str(stage_number), version=self.version, config=self.config)
+        if highest_stage == 1:
+            max_grid_iterations = stages_config["stage1"]["grid_iterations"]
+            yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
+        else:
+            yield POWHEGStageTimings(stage=self.get_stage_str(highest_stage), version=self.version, config=self.config)
 
 
 class POWHEGWorkflow_multiple_configs(POWHEGWrapper_template):
