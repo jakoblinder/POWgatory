@@ -97,8 +97,8 @@ resources:
 # ================================================================================
 powheg_parameters:
   # Uncomment to override:
-  # ncall1: 50000              # Grid optimization calls
-  # ncall2: 100000             # Cross section calls
-  # nevents: 100000            # Number of events
-  # parallelstage: 3
+  # ncall1:  20000   # Grid optimization calls
+  # ncall2:  20000   # Cross section calls
+  # nubound: 10000   # Upper bound calls
+  # numevts:  1000   # Number of events
 

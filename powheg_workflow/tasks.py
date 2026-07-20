@@ -456,20 +456,19 @@ class POWHEGStage(POWHEGBaseTask):
         """Execute POWHEG for this task."""
         if apptainer_image:
             self.publish_message(f"Running POWHEG in container: {apptainer_image}")
-            cmd = ["apptainer", "exec", apptainer_image, ]
+            cmd = ["apptainer", "exec", apptainer_image]
         else:
             cmd = ["exec", ]
 
         pwhg_main = self.config['powheg_executable']
 
-        # Create log file for output
-        # log_file = self.config["cwd"] / f"{job_code}-task{task_id}.log"
         log_dir = Path(self.get_log_file_dir()).resolve()
         log_file = log_dir / f"{job_code}.log"
 
         def call_job_script(script, job_code, task_id, program, log_file):
             """Call the pwhg_run.sh script with the correct arguments."""
-            cmd_script  = [str(script), job_code, task_id, program, str(log_file)]
+            # cmd_script  = [str(script), job_code, task_id, program, str(log_file)]
+            cmd_script  = [str(script), job_code, task_id, program]
             return cmd_script
 
         cmd += call_job_script(Path(self.config["script_dir"]) / "pwhg_run.sh", job_code, task_id, pwhg_main, log_file)
@@ -478,17 +477,23 @@ class POWHEGStage(POWHEGBaseTask):
 
         self.publish_message(f"Executing command: {' '.join(cmd)} in {self.config['job_settings']['run_dir']}")
         self.publish_message(f"Logging output to: {log_file}")
-        try:
-            with open(log_file, 'w') as logf:
-                result = subprocess.run(
+        with open(log_file, 'w') as logf:
+            # Write start time to log file. E.g. <Started-POWHEG:p1-x1-s1=2026-07-20T08:10:05.858527+00:00>.
+            logf.write(f"<Started-POWHEG:{job_code}={datetime.now(timezone.utc).isoformat()}>\n")
+
+        with open(log_file, 'a') as logf:
+            try:
+                subprocess.run(
                     cmd,
                     cwd=self.config['job_settings']['run_dir'],
                     stdout=logf,
                     stderr=subprocess.STDOUT,
-                    check=True
+                    check=True,
                 )
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"POWHEG failed: {e}")
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"POWHEG failed: {e}")
+            finally:
+                logf.write(f"<Finished-POWHEG:{job_code}={datetime.now(timezone.utc).isoformat()}>\n")
 
 
 class POWHEGStageWrapper(POWHEGWrapper_template):
@@ -508,7 +513,11 @@ class POWHEGStageWrapper(POWHEGWrapper_template):
         ntasks = self.config["stages"][f"{self.stage}"]["resources"]['ntasks']
 
         for branch_id in range(1, ntasks + 1):
-            yield POWHEGStage(stage=self.stage, grid_iteration=self.grid_iteration, version=self.version, branch_id=branch_id, config=self.config)
+            yield POWHEGStage(stage=self.stage,
+                              grid_iteration=self.grid_iteration,
+                              version=self.version,
+                              branch_id=branch_id,
+                              config=self.config)
 
 
 ######################
