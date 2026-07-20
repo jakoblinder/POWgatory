@@ -68,6 +68,15 @@ class POWHEGPresubmit(POWHEGBaseTask):
             with self.output().open('w') as f:
                 f.write(f"{self.stage_name}: No presubmit script defined. Skipping..\n")
 
+    def requires(self):
+        # Depend on setup task for this grid iteration.
+        yield POWHEGcreateSymlinks(
+            stage          = self.stage,
+            grid_iteration = self.grid_iteration,
+            version        = self.version,
+            config         = self.config
+        )
+
 
 class POWHEGStageSetup(POWHEGBaseTask):
     """
@@ -99,9 +108,9 @@ class POWHEGStageSetup(POWHEGBaseTask):
 
         # self.get_scripts()
 
-    def requires(self):
-        """Depend on presubmit task."""
-        yield POWHEGPresubmit(version=self.version, config=self.config)
+    # def requires(self):
+    #     """Depend on presubmit task."""
+    #     yield POWHEGPresubmit(version=self.version, config=self.config)
 
     def create_powheg_input(self, stage:str, grid: int = 1):
         """
@@ -357,6 +366,9 @@ class POWHEGStage(POWHEGBaseTask):
             version        = self.version,
             config         = self.config
         )
+        # Depend on presubmit task.
+        yield POWHEGPresubmit(version=self.version, config=self.config)
+
         if self.stage_number == 1 and self.grid_iteration > 1:
             # Depend on previous grid iteration for Stage 1
             yield POWHEGStageWrapper(stage=self.get_stage_str(1), grid_iteration=self.grid_iteration - 1, version=self.version, config=self.config)
