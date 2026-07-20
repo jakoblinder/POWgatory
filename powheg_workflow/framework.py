@@ -238,7 +238,15 @@ class POWHEGBaseTask(Task):
         return sif_path
 
     def stage_code(self, stage: str, grid: int = -1) -> str:
-        """Generate unique stage identifier for job naming."""
+        """
+        Generate unique stage identifier for job naming.
+
+        Args:
+            stage (str): Stage name (e.g., "stage1", "stage2", "stage3", "stage4", "addweights", "analysis").
+            grid (int): Grid iteration number (default: -1, meaning no grid iteration).
+        Returns:
+            str: Unique stage identifier (e.g., "p1-x1" for stage1 grid iteration 1).
+        """
         if isinstance(stage, str) and stage.startswith("stage") and not stage.endswith("_gridcombine"):
             # stage_number = int(stage.replace("stage", ""))
             if grid > 0:
@@ -249,7 +257,16 @@ class POWHEGBaseTask(Task):
             return f"{stage}"
 
     def job_code(self, stage: str, grid: int = -1, seed: int = 1) -> str:
-        """Generate unique job identifier."""
+        """
+        Generate unique job identifier.
+        Args:
+            stage (str): Stage name (e.g., "stage1", "stage2", "stage3", "stage4", "addweights", "analysis").
+            grid (int): Grid iteration number (default: -1, meaning no grid iteration).
+            seed (int): Random seed for the job (default: 1).
+        Returns:
+            str: Unique stage identifier (e.g., "p1-x1-s1" for stage1 grid iteration 1 with seed 1).
+
+        """
         return f"{self.stage_code(stage, grid)}-s{seed}"
 
     def get_job_time(self) -> str:
