@@ -13,6 +13,7 @@ import os
 import re
 import time
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
@@ -496,6 +497,114 @@ class POWHEGStage(POWHEGBaseTask):
                 logf.write(f"<Finished-POWHEG:{job_code}={datetime.now(timezone.utc).isoformat()}>\n")
 
 
+class POWHEGStageTimings(POWHEGBaseTask):
+    """
+    Summary task that scans existing POWHEG log files for a stage and writes a timing report.
+    """
+
+    stage = b2luigi.Parameter(
+        default="stage1",
+        description="POWHEG stage number (stage1, stage2, stage3, stage4)"
+    )
+    grid_iteration = b2luigi.IntParameter(
+        default=-1,
+        description="Grid iteration number (1, 2, 3, ...)"
+    )
+
+    batch_system = "local"
+
+    @property
+    def stage_name(self) -> str:
+        if self.grid_iteration > 0:
+            return f"{self.stage}-grid{self.grid_iteration}"
+        return self.stage
+
+    def requires(self):
+        yield POWHEGStageWrapper(
+            stage=self.stage,
+            grid_iteration=self.grid_iteration,
+            version=self.version,
+            config=self.config,
+        )
+
+    def output(self):
+        return self.local_target(f"Timings-{self.stage_name}.txt")
+
+    def _log_files(self) -> List[Path]:
+        log_dir = Path(self.get_log_file_dir()).resolve()
+        log_prefix = f"{self.stage_code(self.stage, self.grid_iteration)}-s"
+        return sorted(log_dir.glob(f"{log_prefix}*.log"))
+
+    @staticmethod
+    def _parse_log_timing(log_file: Path):
+        start_time = None
+        finish_time = None
+        job_code = None
+
+        with log_file.open("r") as handle:
+            for line in handle:
+                if line.startswith("<Started-POWHEG:"):
+                    match = re.match(r"<Started-POWHEG:(?P<job_code>[^=]+)=(?P<timestamp>[^>]+)>", line.strip())
+                    if match:
+                        job_code = match.group("job_code")
+                        start_time = datetime.fromisoformat(match.group("timestamp"))
+                elif line.startswith("<Finished-POWHEG:"):
+                    match = re.match(r"<Finished-POWHEG:(?P<job_code>[^=]+)=(?P<timestamp>[^>]+)>", line.strip())
+                    if match:
+                        finish_time = datetime.fromisoformat(match.group("timestamp"))
+
+        if start_time is None or finish_time is None:
+            return None
+
+        if job_code is None:
+            job_code = log_file.stem
+
+        seed_match = re.search(r"-s(?P<seed>\d+)$", job_code)
+        seed = int(seed_match.group("seed")) if seed_match else -1
+
+        return {
+            "log_file": log_file,
+            "job_code": job_code,
+            "seed": seed,
+            "started_at": start_time,
+            "finished_at": finish_time,
+            "elapsed_seconds": (finish_time - start_time).total_seconds(),
+        }
+
+    def run(self):
+        timings = []
+        skipped = []
+
+        for log_file in self._log_files():
+            parsed = self._parse_log_timing(log_file)
+            if parsed is None:
+                skipped.append(log_file)
+                continue
+            timings.append(parsed)
+
+        if not timings:
+            raise RuntimeError(f"No readable POWHEG timing entries found for {self.stage_name}")
+
+        shortest = min(timings, key=lambda entry: entry["elapsed_seconds"])
+        longest = max(timings, key=lambda entry: entry["elapsed_seconds"])
+        average_seconds = sum(entry["elapsed_seconds"] for entry in timings) / len(timings)
+
+        lines = [
+            f"Stage: {self.stage_name}",
+            f"Log directory: {self.get_log_file_dir()}",
+            f"Runs parsed: {len(timings)}",
+            f"Skipped logs: {len(skipped)}",
+            f"Shortest: {shortest['elapsed_seconds']:.3f}s (seed {shortest['seed']}, log {shortest['log_file'].name})",
+            f"Longest: {longest['elapsed_seconds']:.3f}s (seed {longest['seed']}, log {longest['log_file'].name})",
+            f"Average: {average_seconds:.3f}s",
+        ]
+
+        with self.output().open("w") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+        self.publish_message(f"Wrote timing summary to {self.output()}")
+
+
 class POWHEGStageWrapper(POWHEGWrapper_template):
     """
     Wrapper task for a POWHEG stage, yielding multiple parallel tasks.
@@ -537,14 +646,22 @@ class POWHEGWorkflow(POWHEGWrapper_template):
         #     return POWHEGAnalysis(config_file=self.config_file, version=self.version)
 
         if stages_config['stage4']['enabled']:
-            yield POWHEGStageWrapper(stage=self.get_stage_str(4), version=self.version, config=self.config)
+            highest_stage = 4
         elif stages_config['stage3']['enabled']:
-            yield POWHEGStageWrapper(stage=self.get_stage_str(3), version=self.version, config=self.config)
+            highest_stage = 3
         elif stages_config['stage2']['enabled']:
-            yield POWHEGStageWrapper(stage=self.get_stage_str(2), version=self.version, config=self.config)
+            highest_stage = 2
         elif stages_config['stage1']['enabled']:
-            max_grid_iterations = stages_config["stage1"]["grid_iterations"]
-            yield POWHEGStageWrapper(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
+            highest_stage = 1
+        else:
+            highest_stage = 0
+
+        for stage_number in range(1, highest_stage + 1):
+            if stage_number == 1:
+                grid_iteration = stages_config["stage1"]["grid_iterations"]
+                yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=grid_iteration, version=self.version, config=self.config)
+            else:
+                yield POWHEGStageTimings(stage=self.get_stage_str(stage_number), version=self.version, config=self.config)
 
 
 class POWHEGWorkflow_multiple_configs(POWHEGWrapper_template):
