@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
+import yaml
+
 # from .config import POWHEGConfig
 
 # Import our framework classes
@@ -540,7 +542,20 @@ class POWHEGStageTimings(POWHEGBaseTask):
         )
 
     def output(self):
-        return self.local_target(f"Timings-{self.stage_name}.txt")
+        return self.local_target("timings.yaml")
+
+    def complete(self):
+        output_target = self.output()
+        if not output_target.exists():
+            return False
+
+        try:
+            with output_target.open("r") as handle:
+                timings_data = yaml.safe_load(handle) or {}
+        except yaml.YAMLError:
+            return False
+
+        return self.stage_name in timings_data
 
     def _log_files(self) -> List[Path]:
         log_dir = Path(self.get_log_file_dir()).resolve()
@@ -598,23 +613,65 @@ class POWHEGStageTimings(POWHEGBaseTask):
             raise RuntimeError(f"No readable POWHEG timing entries found for {self.stage_name}")
 
         shortest = min(timings, key=lambda entry: entry["elapsed_seconds"])
-        longest = max(timings, key=lambda entry: entry["elapsed_seconds"])
+        longest  = max(timings, key=lambda entry: entry["elapsed_seconds"])
         average_seconds = sum(entry["elapsed_seconds"] for entry in timings) / len(timings)
+        total_absolute_seconds = sum(entry["elapsed_seconds"] for entry in timings)
+        total_cpu_hours        = total_absolute_seconds / 3600.0
 
-        lines = [
-            f"Stage: {self.stage_name}",
-            f"Log directory: {self.get_log_file_dir()}",
-            f"Runs parsed: {len(timings)}",
-            f"Skipped logs: {len(skipped)}",
-            f"Shortest: {shortest['elapsed_seconds']:.3f}s (seed {shortest['seed']}, log {shortest['log_file'].name})",
-            f"Longest: {longest['elapsed_seconds']:.3f}s (seed {longest['seed']}, log {longest['log_file'].name})",
-            f"Average: {average_seconds:.3f}s",
-        ]
+        output_target = self.output()
+        timings_data = {}
+        if output_target.exists():
+            try:
+                with output_target.open("r") as handle:
+                    timings_data = yaml.safe_load(handle) or {}
+            except yaml.YAMLError:
+                timings_data = {}
 
-        with self.output().open("w") as handle:
-            handle.write("\n".join(lines) + "\n")
+        timings_data[self.stage_name] = {
+            "Log directory": self.get_log_file_dir(),
+            "Runs parsed": len(timings),
+            "Skipped logs": len(skipped),
+            "Total absolute time": f"{total_absolute_seconds:.3f}s",
+            "Shortest": f"{shortest['elapsed_seconds']:.3f}s (seed {shortest['seed']}, log {shortest['log_file'].name})",
+            "Longest": f"{longest['elapsed_seconds']:.3f}s (seed {longest['seed']}, log {longest['log_file'].name})",
+            "Average": f"{average_seconds:.3f}s",
+        }
 
-        self.publish_message(f"Wrote timing summary to {self.output()}")
+        all_elapsed_seconds = []
+        longest_per_stage_seconds = []
+        n_stages = 0
+        for key, entry in timings_data.items():
+            if key in {"total", "Total"} or not isinstance(entry, dict):
+                continue
+
+            n_stages += 1
+            total_absolute = entry.get("Total absolute time")
+            longest_per_stage = entry.get("Longest")
+            if isinstance(total_absolute, str) and total_absolute.endswith("s"):
+                try:
+                    all_elapsed_seconds.append(float(total_absolute[:-1]))
+                except ValueError:
+                    continue
+            if isinstance(longest_per_stage, str) and longest_per_stage.endswith("s"):
+                try:
+                    longest_per_stage_seconds.append(float(longest_per_stage[:-1]))
+                except ValueError:
+                    continue
+
+        total_stage_absolute_seconds = sum(all_elapsed_seconds)
+        run_time = sum(longest_per_stage_seconds)
+
+        timings_data["total"] = {
+            "Total absolute time": f"{total_stage_absolute_seconds:.3f}s",
+            "CPU hours": f"{total_stage_absolute_seconds / 3600.0:.3f}",
+            "Total run time": f"{run_time:.3f}s",
+            "Stages": n_stages,
+        }
+
+        with output_target.open("w") as handle:
+            yaml.safe_dump(timings_data, handle, sort_keys=False, default_flow_style=False)
+
+        self.publish_message(f"Wrote timing summary to {output_target}")
 
 
 class POWHEGStageWrapper(POWHEGWrapper_template):
