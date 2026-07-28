@@ -652,11 +652,13 @@ class POWHEGStageTimings(POWHEGBaseTask):
                     all_elapsed_seconds.append(float(total_absolute[:-1]))
                 except ValueError:
                     continue
-            if isinstance(longest_per_stage, str) and longest_per_stage.endswith("s"):
-                try:
-                    longest_per_stage_seconds.append(float(longest_per_stage[:-1]))
-                except ValueError:
-                    continue
+            if isinstance(longest_per_stage, str):
+                time_string = longest_per_stage.split()[0]
+                if time_string.endswith("s"):
+                    try:
+                        longest_per_stage_seconds.append(float(time_string[:-1]))
+                    except ValueError:
+                        continue
 
         total_stage_absolute_seconds = sum(all_elapsed_seconds)
         run_time = sum(longest_per_stage_seconds)
