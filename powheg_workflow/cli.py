@@ -151,6 +151,7 @@ def run_workflow():
 
 
     # number of workers == number of parallel tasks to run.
+    # TODO: Make this a command line argument again with different default values depending on wether slurm or local is used.
     def get_max_workers(config):
         try:
             return config["cluster_config"]["slurm"]["max_parallel_jobs"]
