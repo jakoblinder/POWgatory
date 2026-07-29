@@ -668,7 +668,7 @@ class POWHEGStageTimings(POWHEGBaseTask):
         timings_data["total"] = {
             "Total absolute time": f"{total_stage_absolute_seconds:.3f}s",
             "CPU hours": f"{total_stage_absolute_seconds / 3600.0:.3f}",
-            "Total run time": f"{run_time:.3f}s",
+            "Total run time": f"{run_time/ 3600.0:.3f}h",
             "Stages": n_stages,
         }
 
