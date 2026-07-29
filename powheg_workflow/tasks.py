@@ -319,7 +319,8 @@ class POWHEGStage(POWHEGBaseTask):
     def batch_system(self) -> str:
         if self.config["stages"][self.stage]["resources"]["cluster"] == "local":
             return "local"
-        return "slurm"
+        else:
+            return "slurm"
 
     @property
     def job_name(self) -> str:
@@ -329,25 +330,25 @@ class POWHEGStage(POWHEGBaseTask):
     def slurm_settings(self) -> Dict[str, Any]:
         if self.config["stages"][self.stage]["resources"]["cluster"] == "local":
             return {}
+        else:
+            job_time      = self.config["stages"][self.stage]["resources"]["time"]
+            partition     = self.config["stages"][self.stage]["resources"]["partition"]
+            mem           = self.config["stages"][self.stage]["resources"]["mem"]
+            cpus_per_task = 1
+            exclude_nodes = self.config["job_settings"]["exclude_nodes"]
 
-        job_time      = self.config["stages"][self.stage]["resources"]["time"]
-        partition     = self.config["stages"][self.stage]["resources"]["partition"]
-        mem           = self.config["stages"][self.stage]["resources"]["mem"]
-        cpus_per_task = 1
-        exclude_nodes = self.config["job_settings"]["exclude_nodes"]
+            slurm_settings = {
+                "export": "NONE",
+                "partition": partition,
+                "ntasks": cpus_per_task,
+                "mem": mem,
+                "time": job_time,
+                "job-name": self.job_name,
+            }
+            if exclude_nodes:
+                slurm_settings["exclude"] = ",".join(exclude_nodes)
 
-        slurm_settings = {
-            "export": "NONE",
-            "partition": partition,
-            "ntasks": cpus_per_task,
-            "mem": mem,
-            "time": job_time,
-            "job-name": self.job_name,
-        }
-        if exclude_nodes:
-            slurm_settings["exclude"] = ",".join(exclude_nodes)
-
-        return slurm_settings
+            return slurm_settings
 
     @property
     def stage_name(self) -> str:
