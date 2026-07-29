@@ -480,15 +480,18 @@ class POWHEGStage(POWHEGBaseTask):
         log_dir = Path(self.get_log_file_dir()).resolve()
         log_file = log_dir / f"{job_code}.log"
 
-        def call_job_script(script, job_code, task_id, program, log_file):
-            """Call the pwhg_run.sh script with the correct arguments."""
-            # cmd_script  = [str(script), job_code, task_id, program, str(log_file)]
-            cmd_script  = [str(script), job_code, task_id, program]
+        def call_job_script(script, job_code, task_id, program, log_file=""):
+            """
+            Call the pwhg_run.sh script with the correct arguments.
+
+            script, job_code, task_id, program, log_file=""
+            """
+            inputs     = [script, job_code, task_id, program, log_file]
+            cmd_script = [str(i) for i in inputs if i]  # Convert to strings and filter out empty log_file
+
             return cmd_script
 
         cmd += call_job_script(Path(self.config["script_dir"]) / "pwhg_run.sh", job_code, task_id, pwhg_main, log_file)
-        # cmd += [pwhg_main,]
-        cmd = list(map(str, cmd))  # Ensure all parts are strings
 
         self.publish_message(f"Executing command: {' '.join(cmd)} in {self.config['job_settings']['run_dir']}")
         self.publish_message(f"Logging output to: {log_file}")
@@ -496,18 +499,16 @@ class POWHEGStage(POWHEGBaseTask):
             # Write start time to log file. E.g. <Started-POWHEG:p1-x1-s1=2026-07-20T08:10:05.858527+00:00>.
             logf.write(f"<Started-POWHEG:{job_code}={datetime.now(timezone.utc).isoformat()}>\n")
 
-        with open(log_file, 'a') as logf:
-            try:
-                subprocess.run(
-                    cmd,
-                    cwd=self.config['job_settings']['run_dir'],
-                    stdout=logf,
-                    stderr=subprocess.STDOUT,
-                    check=True,
-                )
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(f"POWHEG failed: {e}")
-            finally:
+        try:
+            subprocess.run(
+                cmd,
+                cwd=self.config['job_settings']['run_dir'],
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"POWHEG failed: {e}")
+        finally:
+            with open(log_file, 'a') as logf:
                 logf.write(f"<Finished-POWHEG:{job_code}={datetime.now(timezone.utc).isoformat()}>\n")
 
 
