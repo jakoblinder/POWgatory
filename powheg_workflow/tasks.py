@@ -310,24 +310,120 @@ class POWHEGStage(POWHEGBaseTask):
     @property
     def task_cmd_additional_args(self) -> List[str]:
         """
-        Additional command-line arguments for the task.
-        Necessary for the batch submission.
+        Returns:
+            Additional command-line arguments for the task.
+            Necessary for the batch submission.
         """
         return ["--config_file", str(self.config["config_file"])]  # Pass config file to each task
 
     @property
-    def batch_system(self) -> str:
-        if self.config["stages"][self.stage]["resources"]["cluster"] == "local":
-            return "local"
-        else:
-            return "slurm"
+    def result_dir(self) -> str:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("result_dir", <value>) for this task.
+
+        Returns:
+            Directory where the results of this task are stored.
+        """
+        run_dir = str(self.config['job_settings']['run_dir'])
+        return run_dir
+
+    @property
+    def env_script(self) -> str:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("env_script", <value>) for this task.
+
+        Returns:
+            Script to set up the environment for this task.
+        """
+        run_dir = str(self.config['job_settings']['run_dir'])
+        return f"{run_dir}/bootstrap.sh"
+
+    @property
+    def task_file_dir(self) -> str:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("task_file_dir", <value>) for this task.
+
+        Returns:
+            Directory where task files 'executable_wrapper.sh' and 'slurm_parameters.sh' will be stored.
+        """
+        run_dir = str(self.config['job_settings']['run_dir'])
+        return f"{run_dir}/task_files"
+
+    @property
+    def working_dir(self) -> str:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("working_dir", <value>) for this task.
+
+        Returns:
+            Directory from which to run the workflow; this should be absolute to avoid issues with relative paths in batch systems
+        """
+        return str(self.config['cwd'])
+
+
+    @property
+    def executable_prefix(self) -> str:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("executable_prefix", <value>) for this task.
+
+        Make sure the python executable is used for tasks which was used to run the workflow.
+        This is important if virtual environments in combination with batch jobs are used.
+        Alternatively the virtual environment could be activated in the bootstrap.sh script.
+
+        Returns:
+            Python executable to use for this task, formatted as a list for easy concatenation with other commands.
+        """
+        python_path = str(self.config['python'])
+        return [python_path,]
+
+    @property
+    def executable(self) -> str:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("executable", <value>) for this task.
+
+        Returns:
+            Python script to execute for this task, formatted as a list for easy concatenation with other commands.
+            Path to the main entry point of this program.
+            This replaces the relative setting of the python script which 'add_filename_to_cmd == True' would use.
+        """
+        this_file_path = Path(__file__).resolve()
+        main_file      = this_file_path.parent.parent / "please_work.py"
+        return [str(main_file),]
+
+    @property
+    def add_filename_to_cmd(self) -> str:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("add_filename_to_cmd", <value>) for this task.
+
+        We don't want to add the filename to the command, because we already set it explicitly.
+        (See 'executable' property.)
+        """
+        return False
 
     @property
     def job_name(self) -> str:
         return f"{self.config['job_settings']['job_name']}_{self.stage_name}_s{self.branch_id}"
 
     @property
+    def batch_system(self) -> str:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("batch_system", <value>) for this task.
+
+        Return the batch system to use for this task.
+        If cluster is set to 'local', 'local' otherwise 'slurm'.
+        """
+        if self.config["stages"][self.stage]["resources"]["cluster"] == "local":
+            return "local"
+        else:
+            return "slurm"
+
+    @property
     def slurm_settings(self) -> Dict[str, Any]:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("slurm_settings", <value>) for this task.
+
+        SLURM-specific settings for the batch submission.
+        If cluster is set to 'local', this returns an empty dictionary.
+        """
         if self.config["stages"][self.stage]["resources"]["cluster"] == "local":
             return {}
         else:
@@ -472,7 +568,7 @@ class POWHEGStage(POWHEGBaseTask):
         """Execute POWHEG for this task."""
         if apptainer_image:
             self.publish_message(f"Running POWHEG in container: {apptainer_image}")
-            cmd = ["apptainer", "exec", apptainer_image]
+            cmd = ["apptainer", "exec", str(apptainer_image)]
         else:
             cmd = ["exec", ]
 
@@ -494,7 +590,7 @@ class POWHEGStage(POWHEGBaseTask):
 
         cmd += call_job_script(Path(self.config["script_dir"]) / "pwhg_run.sh", job_code, task_id, pwhg_main, log_file)
 
-        self.publish_message(f"Executing command: {' '.join(cmd)} in {self.config['job_settings']['run_dir']}")
+        self.publish_message(f"Executing command: {' '.join(cmd)} in {str(self.config['job_settings']['run_dir'])}")
         self.publish_message(f"Logging output to: {log_file}")
         with open(log_file, 'w') as logf:
             # Write start time to log file. E.g. <Started-POWHEG:p1-x1-s1=2026-07-20T08:10:05.858527+00:00>.
@@ -742,10 +838,6 @@ class POWHEGWorkflow_multiple_configs(POWHEGWrapper_template):
     def requires(self):
         for config_file in self.configuration_files:
             config = POWHEGConfig.from_yaml(config_file)
-
-            set_b2luigi_settings(cwd         = config["cwd"],
-                                 run_dir     = config["job_settings"]["run_dir"],
-                                 python      = config["python"])
 
             config_dict = config.to_dict()  # Convert to dictionary for serialization
 
