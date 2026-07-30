@@ -24,7 +24,6 @@ import yaml
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapper_template
 from .config import POWHEGConfig
-from .cli import set_b2luigi_settings
 
 
 class POWHEGPresubmit(POWHEGBaseTask):
