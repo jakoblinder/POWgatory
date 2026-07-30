@@ -18,6 +18,6 @@ echo "[${JOBCODE} (`hostname`)] Received: SEED=${SEED}, PRG=${PRG}"
 #     fi
 # else
 
-echo "[${JOBCODE} (`hostname`)] Running: echo ${SEED} | ${PRG} > ${LOGFILE} 2>&1"
-echo ${SEED} | ${PRG} > ${LOGFILE} 2>&1
+echo "[${JOBCODE} (`hostname`)] Running: echo ${SEED} | ${PRG} >> ${LOGFILE} 2>&1"
+echo ${SEED} | ${PRG} >> ${LOGFILE} 2>&1
 # fi
