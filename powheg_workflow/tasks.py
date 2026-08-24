@@ -531,6 +531,8 @@ class POWHEGStage(POWHEGBaseTask):
 
     def run(self):
         """Execute one task of Stage 1."""
+        self._quarantine_stale_outputs()
+
         container = self.setup_container()
 
         job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)
@@ -565,6 +567,51 @@ class POWHEGStage(POWHEGBaseTask):
         #     # Mark complete
         #     with self.output().open('w') as f:
         #         f.write(f"{self.stage} completed for branch {self.branch_id}\n")
+
+    def _quarantine_stale_outputs(self):
+        """
+        Move any leftover output/ log files from a previous, incomplete run of
+        this branch out of the way, so POWHEG does not refuse to run because a
+        (partial) file with the same name already exists, and so we keep a
+        record of what happened in the failed attempt.
+        """
+        run_dir = Path(self.config['job_settings']['run_dir'])
+        backup_root = run_dir / "incomplete_run_backups"
+
+        # Collect every filename that any of the possible output-target sets for
+        # this stage/branch could refer to.
+        candidate_paths = set()
+        for target_set in self.output():
+            for target in target_set:
+                candidate_paths.add(Path(target.path))
+
+        # # Stage 4's event file is the known culprit: POWHEG refuses to run if it
+        # # already exists, even if the run was previously incomplete.
+        # if self.stage_number == 4:
+        #     candidate_paths.add(run_dir / f"pwgevents-{self.branch_id:04d}.lhe")
+
+        # Also grab the log file from the previous attempt, so we don't lose it.
+        job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)
+        log_dir  = Path(super().get_log_file_dir()).resolve()
+        log_file = log_dir / f"{job_code}.log"
+        candidate_paths.add(log_file)
+
+        backup_dir = None
+        def _get_backup_dir():
+            nonlocal backup_dir
+            if backup_dir is None:
+                timestamp  = datetime.now(ZoneInfo('Europe/Berlin')).strftime("%Y%m%dT%H%M%SZ")
+                backup_dir = backup_root / f"{self.stage_code(self.stage, self.grid_iteration)}-s{self.branch_id}_{timestamp}"
+                backup_dir.mkdir(parents=True, exist_ok=True)
+            return backup_dir
+
+        for stale_path in candidate_paths:
+            if stale_path.exists():
+                destination = _get_backup_dir() / stale_path.name
+                self.publish_message(f"Found stale/ incomplete file {stale_path}, moving to {destination}")
+                stale_path.rename(destination)
+
+        return backup_dir is not None
 
     def _run_powheg(self, job_code: str, task_id: int, apptainer_image: str=None):
         """Execute POWHEG for this task."""
