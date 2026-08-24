@@ -8,12 +8,15 @@ This module implements the POWHEG workflow using b2luigi (BELLE2 Luigi):
 - Container execution via b2luigi
 """
 
+from sys import path
+
 import b2luigi
 import os
 import re
 import time
 import subprocess
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
@@ -487,7 +490,7 @@ class POWHEGStage(POWHEGBaseTask):
             Depending on the implementation (ggHH does weird stuff here) 'pwggridinfo-[btl|rmn]-xg?-?.dat'
             files are produced instead.
 
-            # FIXME: Do we always have a rmn file for which we should check?
+            # FIXME: Do we always have a rmn (remnant) file for which we should check?
 
             For stage 2 to 4, we use the single 'pwgcounters-st?-????.dat' file, which is always produced
             and especially produced after having a finished event file.
@@ -593,7 +596,7 @@ class POWHEGStage(POWHEGBaseTask):
         self.publish_message(f"Logging output to: {log_file}")
         with open(log_file, 'w') as logf:
             # Write start time to log file. E.g. <Started-POWHEG:p1-x1-s1=2026-07-20T08:10:05.858527+00:00>.
-            logf.write(f"<Started-POWHEG:{job_code}={datetime.now(timezone.utc).isoformat()}>\n")
+            logf.write(f"<Started-POWHEG:{job_code}={datetime.now(ZoneInfo('Europe/Berlin')).isoformat()}>\n")
 
         try:
             subprocess.run(
@@ -605,7 +608,7 @@ class POWHEGStage(POWHEGBaseTask):
             raise RuntimeError(f"POWHEG failed: {e}")
         finally:
             with open(log_file, 'a') as logf:
-                logf.write(f"<Finished-POWHEG:{job_code}={datetime.now(timezone.utc).isoformat()}>\n")
+                logf.write(f"<Finished-POWHEG:{job_code}={datetime.now(ZoneInfo('Europe/Berlin')).isoformat()}>\n")
 
 
 class POWHEGStageTimings(POWHEGBaseTask):
