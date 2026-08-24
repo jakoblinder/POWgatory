@@ -351,6 +351,15 @@ class POWHEGStage(POWHEGBaseTask):
         run_dir = str(self.config['job_settings']['run_dir'])
         return f"{run_dir}/task_files"
 
+    def get_log_file_dir(self):
+        """
+        Overwrite of frameworks log file directory for this task, to have it seed specific for the slurm output and error files.
+        """
+        log_dir  = str(super().get_log_file_dir())
+        job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)
+
+        return f"{log_dir}/{job_code}"
+
     @property
     def working_dir(self) -> str:
         """
@@ -623,7 +632,7 @@ class POWHEGStage(POWHEGBaseTask):
 
         pwhg_main = self.config['powheg_executable']
 
-        log_dir = Path(self.get_log_file_dir()).resolve()
+        log_dir = Path(super().get_log_file_dir()).resolve()
         log_file = log_dir / f"{job_code}.log"
 
         def call_job_script(script, job_code, task_id, program, log_file=""):
