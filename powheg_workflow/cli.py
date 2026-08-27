@@ -21,6 +21,49 @@ import b2luigi
 from .config import POWHEGConfig
 from . import __version__
 
+# This block makes sure that jobs are scheduled with a 2 second wait.
+# It monkey patches the b2luigi SlurmProcess class 
+import threading, time
+from b2luigi.batch.processes.slurm import SlurmProcess
+
+_submit_lock = threading.Lock()
+_last_submit_time = [0.0]
+_submit_count = [0]
+_start_time = time.time()
+MIN_SBATCH_INTERVAL = 2.0  # May be increased/decreased in the future. 2s is probably too conservative
+
+_original_start_job = SlurmProcess.start_job
+
+def _throttled_start_job(self):
+    with _submit_lock:
+        now = time.time()
+        wait = MIN_SBATCH_INTERVAL - (now - _last_submit_time[0])
+
+        if wait > 0:
+            print(
+                f"[submit throttle] Waiting {wait:.2f}s "
+                f"(submission #{_submit_count[0] + 1}, "
+                f"{_submit_count[0] / max(now - _start_time, 1e-6):.2f} jobs/s so far)"
+            )
+            time.sleep(wait)
+        else:
+            print(
+                f"[submit throttle] wait < 0.00s "
+                f"(submission #{_submit_count[0] + 1}, "
+                f"{_submit_count[0] / max(now - _start_time, 1e-6):.2f} jobs/s so far)"
+            )
+
+            
+        result = _original_start_job(self)
+
+        _submit_count[0] += 1
+        _last_submit_time[0] = time.time()
+    
+    return result
+ 
+
+SlurmProcess.start_job = _throttled_start_job
+# End of patch!
 
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser."""
