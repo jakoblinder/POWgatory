@@ -600,10 +600,11 @@ class POWHEGStage(POWHEGBaseTask):
             for target in target_set:
                 candidate_paths.add(Path(target.path))
 
-        # # Stage 4's event file is the known culprit: POWHEG refuses to run if it
-        # # already exists, even if the run was previously incomplete.
-        # if self.stage_number == 4:
-        #     candidate_paths.add(run_dir / f"pwgevents-{self.branch_id:04d}.lhe")
+        # Stage 4's event file is the known culprit: POWHEG refuses to run if it
+        # already exists, even if the run was previously incomplete.
+        move_incomplete_event_files = False # FIXME: Make this configurable in the config file.
+        if self.stage_number == 4 and move_incomplete_event_files:
+            candidate_paths.add(run_dir / f"pwgevents-{self.branch_id:04d}.lhe")
 
         # Also grab the log file from the previous attempt, so we don't lose it.
         job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)
