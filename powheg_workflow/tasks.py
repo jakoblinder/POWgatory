@@ -711,7 +711,17 @@ class POWHEGStageTimings(POWHEGBaseTask):
         except yaml.YAMLError:
             return False
 
-        return self.stage_name in timings_data
+        if not (self.stage_name in timings_data):
+            # If timings data for this stage is not present, it cannot be complete.
+            return False
+        else:
+            # If the timings data for this stage is present, check if the dependencies are complete
+            # or if the timings entry is coming from an old run.
+            for dependency in self.requires():
+                if not dependency.complete():
+                    return False
+
+        return True
 
     def _log_files(self) -> List[Path]:
         log_dir = Path(self.get_log_file_dir()).resolve()
