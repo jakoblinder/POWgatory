@@ -185,6 +185,12 @@ class POWHEGStageSetup(POWHEGBaseTask):
                 else:
                     new_lines.append(line)
 
+            for param_name, was_found in found.items():
+                if not was_found:
+                    print(f"Warning: Parameter '{param_name}' not found in {src_file}. It is added at the end of the file.")
+                    new_line = f"{param_name} {replacements[param_name]}  ! Added by POWHEG workflow\n"
+                    new_lines.append(new_line)
+
         with open(dest_file, "w") as file:
             file.write("".join(new_lines))
 
