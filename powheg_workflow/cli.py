@@ -22,7 +22,7 @@ from .config import POWHEGConfig
 from . import __version__
 
 # This block makes sure that jobs are scheduled with a 2 second wait.
-# It monkey patches the b2luigi SlurmProcess class 
+# It monkey patches the b2luigi SlurmProcess class
 import threading, time
 from b2luigi.batch.processes.slurm import SlurmProcess
 
@@ -53,14 +53,14 @@ def _throttled_start_job(self):
                 f"{_submit_count[0] / max(now - _start_time, 1e-6):.2f} jobs/s so far)"
             )
 
-            
+
         result = _original_start_job(self)
 
         _submit_count[0] += 1
         _last_submit_time[0] = time.time()
-    
+
     return result
- 
+
 
 SlurmProcess.start_job = _throttled_start_job
 # End of patch!
