@@ -26,38 +26,38 @@ from . import __version__
 import threading, time
 from b2luigi.batch.processes.slurm import SlurmProcess
 
-_submit_lock = threading.Lock()
-_last_submit_time = [0.0]
-_submit_count = [0]
-_start_time = time.time()
-MIN_SBATCH_INTERVAL = 2.0  # May be increased/decreased in the future. 2s is probably too conservative
 
 _original_start_job = SlurmProcess.start_job
 
 def _throttled_start_job(self):
-    with _submit_lock:
-        now = time.time()
-        wait = MIN_SBATCH_INTERVAL - (now - _last_submit_time[0])
+    _throttled_start_job.__dict__["_submit_lock"]      = _throttled_start_job.__dict__.get("_submit_lock", threading.Lock())
+    _throttled_start_job.__dict__["_last_submit_time"] = _throttled_start_job.__dict__.get("_last_submit_time", 0.0)
+    _throttled_start_job.__dict__["_submit_count"]     = _throttled_start_job.__dict__.get("_submit_count", 0)
+    _throttled_start_job.__dict__["_start_time"]       = _throttled_start_job.__dict__.get("_start_time", time.time())
+
+    MIN_SBATCH_INTERVAL = 2.0  # May be increased/decreased in the future. 2s is probably too conservative
+    with _throttled_start_job._submit_lock:
+        now  = time.time()
+        wait = MIN_SBATCH_INTERVAL - (now - _throttled_start_job._last_submit_time)
 
         if wait > 0:
             print(
                 f"[submit throttle] Waiting {wait:.2f}s "
-                f"(submission #{_submit_count[0] + 1}, "
-                f"{_submit_count[0] / max(now - _start_time, 1e-6):.2f} jobs/s so far)"
+                f"(submission #{_throttled_start_job._submit_count + 1}, "
+                f"{_throttled_start_job._submit_count / max(now - _throttled_start_job._start_time, 1e-6):.2f} jobs/s so far)"
             )
             time.sleep(wait)
         else:
             print(
                 f"[submit throttle] wait < 0.00s "
-                f"(submission #{_submit_count[0] + 1}, "
-                f"{_submit_count[0] / max(now - _start_time, 1e-6):.2f} jobs/s so far)"
+                f"(submission #{_throttled_start_job._submit_count + 1}, "
+                f"{_throttled_start_job._submit_count / max(now - _throttled_start_job._start_time, 1e-6):.2f} jobs/s so far)"
             )
-
 
         result = _original_start_job(self)
 
-        _submit_count[0] += 1
-        _last_submit_time[0] = time.time()
+        _throttled_start_job._submit_count += 1
+        _throttled_start_job._last_submit_time = time.time()
 
     return result
 
