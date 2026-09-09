@@ -325,6 +325,7 @@ class POWHEGStage(POWHEGBaseTask):
         Returns:
             The maximum number of tasks to group together.
         """
+        # return int(self.config["cluster_config"]["slurm"]["max_grouping_size"])
         # return int(self.config["cluster_config"]["slurm"]["max_parallel_jobs"])
         return 100
 
@@ -337,6 +338,7 @@ class POWHEGStage(POWHEGBaseTask):
         Returns:
             Submission type for this task. "array" for array jobs, "single" for single jobs.
         """
+        # return str(self.config["cluster_config"]["slurm"]["submission_type"])
         return "array"
 
     @property
