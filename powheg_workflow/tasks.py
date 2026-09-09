@@ -310,10 +310,34 @@ class POWHEGStage(POWHEGBaseTask):
     Grid iterations are sequential (iteration 2 depends on iteration 1).
     """
 
-    branch_id = b2luigi.IntParameter(
+    branch_id = b2luigi.BatchIntParameter(
         default=0,
-        description="Branch ID for this parallel POWHEG execution (0-indexed)"
+        description="Branch ID for this parallel POWHEG execution (0-indexed)",
+        grouping=True
     )
+
+    @property
+    def max_grouping_size(self) -> int:
+        """
+        Maximum number of tasks to group together in a single batch job.
+        # TODO: Make it a parameter of the config file.
+
+        Returns:
+            The maximum number of tasks to group together.
+        """
+        # return int(self.config["cluster_config"]["slurm"]["max_parallel_jobs"])
+        return 100
+
+    @property
+    def submission_type(self) -> str:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("submission_type", <value>) for this task.
+        # TODO: Make it a parameter of the config file.
+
+        Returns:
+            Submission type for this task. "array" for array jobs, "single" for single jobs.
+        """
+        return "array"
 
     @property
     def task_cmd_additional_args(self) -> List[str]:
