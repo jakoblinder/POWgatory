@@ -362,7 +362,8 @@ class POWHEGStage(POWHEGBaseTask):
         Overwrite of frameworks log file directory for this task, to have it seed specific for the slurm output and error files.
         """
         log_dir  = str(super().get_log_file_dir())
-        job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)
+        # Use formatted seed for log file names:
+        job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id, format_seed=True)
 
         return f"{log_dir}/{job_code}"
 
@@ -375,7 +376,6 @@ class POWHEGStage(POWHEGBaseTask):
             Directory from which to run the workflow; this should be absolute to avoid issues with relative paths in batch systems
         """
         return str(self.config['cwd'])
-
 
     @property
     def executable_prefix(self) -> str:
@@ -418,7 +418,12 @@ class POWHEGStage(POWHEGBaseTask):
 
     @property
     def job_name(self) -> str:
-        return f"{self.config['job_settings']['job_name']}_{self.stage_name}_s{self.branch_id}"
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("job_name", <value>) for this task.
+
+        Returns the name of the job.
+        """
+        return f"{self.config['job_settings']['job_name']}_{self.stage_name}_s{self.format_branch_id(self.branch_id)}"
 
     @property
     def batch_system(self) -> str:

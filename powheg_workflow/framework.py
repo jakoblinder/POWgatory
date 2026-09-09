@@ -237,6 +237,35 @@ class POWHEGBaseTask(Task):
 
         return sif_path
 
+    def format_branch_id(self, seed: int | tuple) -> str:
+        """
+        If the seed is a grouped parameter, the seed is a tuple.
+        This method is used to simplify it for printing purposes, e.g. for the job name or file names.
+
+        Args:
+            seed (int | tuple): The seed to format.
+
+        Returns:
+            str: The formatted seed:
+
+            The seed string is simplified as
+                s3to9
+            for seed = (3, 4, 5, 8, 9) for example.
+            If there are less or equal than 5 ids, for example, (3, 4, 5, 8, 9), they are listed as
+                s3-s4-s5-s8-s9
+            For a single seed, the seed string is simply
+                s<id>
+        """
+        if isinstance(seed, tuple):
+            if len(seed) <= 5:
+                seed_str = "-".join([f"s{b}" for b in seed])
+            else:
+                seed_str = "to".join([str(min(seed)), str(max(seed))])
+        else:
+            seed_str = str(seed)
+
+        return seed_str
+
     def stage_code(self, stage: str, grid: int = -1) -> str:
         """
         Generate unique stage identifier for job naming.
@@ -256,7 +285,7 @@ class POWHEGBaseTask(Task):
         else:
             return f"{stage}"
 
-    def job_code(self, stage: str, grid: int = -1, seed: int = 1) -> str:
+    def job_code(self, stage: str, grid: int = -1, seed: int = 1, format_seed: bool = False) -> str:
         """
         Generate unique job identifier.
         Args:
@@ -265,8 +294,14 @@ class POWHEGBaseTask(Task):
             seed (int): Random seed for the job (default: 1).
         Returns:
             str: Unique stage identifier (e.g., "p1-x1-s1" for stage1 grid iteration 1 with seed 1).
+            format_seed (bool): Whether to format the seed as a simplified string (default: False).
 
         """
+        if format_seed:
+            seed = self.format_branch_id(seed)
+        else:
+            seed = str(seed)
+
         return f"{self.stage_code(stage, grid)}-s{seed}"
 
     def get_job_time(self) -> str:
