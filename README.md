@@ -1,210 +1,235 @@
 # POWgatory
 
-<think>The user wants me to write a README for "Powgatory" in the style of bumsrake.de - which is satirical, over-the-top, uses Trump-style hyperbole ("tremendous", "many people are saying", "13/10 severity"), German compound words, self-aware humor about technical pain, trademark symbols, and dramatic branding.
+POWgatory is a [b2luigi](https://b2luigi.readthedocs.io/)-based workflow manager for running multi-stage [POWHEG-BOX](https://powhegbox.mib.infn.it/) NLO event-generation campaigns on a Slurm cluster (or locally, for testing). A single YAML configuration file describes the whole run; POWgatory expands it into a dependency graph of per-seed batch jobs, submits and tracks them, and aggregates timing information as stages complete.
 
-This is for a POWHEG workflow submission tool that captures the "torture" feeling of working with POWHEG's staged workflow.
+This document is the single reference for installing, configuring, and running POWgatory, and for understanding what is and isn't currently implemented.
 
-Let me create a README that matches this energy while being genuinely useful for a POWHEG workflow tool.
-</think>
+## Contents
 
-# POWGATORY™
+- [Overview](#overview)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Pipeline architecture](#pipeline-architecture)
+- [Configuration reference](#configuration-reference)
+- [Batch submission details](#batch-submission-details)
+- [Container support](#container-support)
+- [CLI reference](#cli-reference)
+- [Run directory layout](#run-directory-layout)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
+- [License](#license)
 
-The HUGEST, the MOST TREMENDOUS POWHEG workflow submission primitive in the history of particle physics.  
-Many people are saying it. _Many_. Believe me.
+## Overview
 
-> Nobody gets a clean run. To get a clean run, you need somebody with 197 IQ and he needs about 15% of your patience.
->
-> — prevailing POWHEG doctrine, basically
+A POWHEG-BOX calculation runs in several sequential stages (grid generation, integration, event generation, ...), each of which needs to be split into many parallel seeded jobs and re-joined before the next stage can start. POWgatory automates that:
 
-**Severity: 13/10** (the CVSS people, very sad people, sometimes the worst people, capped severity at 10.0)
+- One `run.yaml` file per campaign describes the POWHEG executable, the stages to run, per-stage resource requests, and POWHEG parameter overrides.
+- b2luigi resolves the task dependency graph and submits per-seed jobs to Slurm (or runs them as local subprocesses for testing), including grouping many seeds into a single array or multi-node job where configured.
+- Each stage's completion is detected from the actual POWHEG output files it produces, and per-seed run times are parsed from job logs and recorded in a `timings.yaml` in the run directory.
+- Optional Apptainer/Singularity container execution and a one-off pre-submission shell hook are supported.
 
----
+## Requirements
 
-## 📜 TABLE OF CONTENTS (because the FAKE NEWS won't read past the headline)
+- Python 3.10+ (the codebase and its dependencies use modern Python features; `setup.py` currently advertises `>=3.7`, which is stale — see [Known limitations](#known-limitations)).
+- [`b2luigi`](https://b2luigi.readthedocs.io/) and `luigi` (installed automatically as dependencies).
+- A Slurm cluster for anything beyond local testing (`sinfo`, `sbatch`, `squeue`, `scancel` must be on `PATH`).
+- [Apptainer](https://apptainer.org/) if you want containerized execution (optional).
+- A working POWHEG-BOX build (`pwhg_main` or equivalent) and its input/seed templates.
 
-  * What is POWGATORY?
-  * The Three Stages (ALL incomplete)
-  * Installation
-  * Usage
-  * The Diagram
-  * What They're Saying
-  * FAQ for Confused Journalists
-  * Why "POWGATORY"?
+**Important:** `submission_type: mpi` (multi-node Slurm jobs, see [Batch submission details](#batch-submission-details)) requires a version of `b2luigi` that implements MPI-style submission. This support is not yet part of any released `b2luigi` version — if you see an `Unknown submission type` error, you need the development checkout of `b2luigi` that added it, not the PyPI package pinned in `setup.py`.
 
----
-
-## 👉 WHAT IS POWGATORY? 👈
-
-POWGATORY is a YUUUGE Python workflow submission primitive for POWHEG. Probably the biggest. Tremendous, really.
-
-Specifically: any physicist with a `powheg-box` installation and a `~/.powgatoryrc` file can submit all stages of a POWHEG-NLO calculation with a single command. The stages go through the queue, wait in purgatory, and eventually produce events. The waiting is tremendous. The patience required is tremendous. The suffering is tremendous.
-
-It is the POWHEG analogue of `submit.py`, `run.sh`, and `please_work.py` — except we gave it a BETTER name, with a BETTER logo, on a BETTER README. The other workflow websites? Disasters. Sad. Many people have told us this.
-
-The workflow lives at the unsafe composition of three POWHEG subsystems that are individually correct:
-
-  1. **`powheg-box`** producing NLO cross-sections with `powheg.input`
-  2. **`pythia8`** being called with `pythia8_card.dat` (no `priv_check` on shower parameters)
-  3. **`hepmc`** writing events to `events.hepmc` through `PHYS_TO_DMAP` (the file system, basically)
-
-Loop the output of `stage1` back to `stage2` over a queue system, and the events get written to disk, where `K` and `IV` are _chosen by the unprivileged caller_ (you, the physicist, with your `~/.powgatoryrc`).
-
----
-
-## 🧠 THE TECHNICAL DETAILS (HIGHLY CLASSIFIED, NOW DECLASSIFIED) 🧠
-
-The bug class is stage-corruption via attacker-influenced in-kernel POWHEG workflow over `M_EXTPG` mbufs produced by `submit.py`. Three subsystems line up to let an unprivileged caller write into a stage's output.
-
-### 1️⃣ `powheg-box` produces NLO cross-sections
-
-```python
-# powgatory/stage1.py:42
-result = subprocess.run(['./run', '-i', 'powheg.input'], check=True)
-# result.returncode now holds the *physical addresses* of the cross-section.
-# This is awesome for performance. It is also awesome for attackers.
-```
-
-On every `x86_64` architecture (amd64, arm64, riscv — `sys/kern/kern_mbuf.c:198-201`) the boot-time default of `kern.ipc.mb_use_ext_pgs` is **1**. Tremendous default. Beautiful default. Wrong default.
-
-### 2️⃣ `pythia8` takes no privilege check
-
-```python
-# powgatory/stage2.py:87
-result = subprocess.run(['pythia8', '-c', 'pythia8_card.dat'], check=True)
-# Notice anything missing here? A priv_check, perhaps?
-# Many people are noticing. Many. Very smart people.
-```
-
-Any unprivileged user can configure shower parameters on any socket they own and supply the `pythia8_card.dat` of their choosing. The receiving side will then run in-place showering against whatever events land in `sb_mtls`.
-
-
-## 📐 THE DIAGRAM 📐
-
-The fake news won't show you this diagram. The fake news doesn't even _understand_ this diagram. Believe me, we have the best diagrams.
-
-```
-                              user (uid 1001)
-                                    │
-                                    │ powgatory submit
-                                    ▼
-       ┌──────────────────────────────────────────────────────────────────────┐
-       │  powgatory/stage1.py:42                                              │
-       │    subprocess.run(['./run', '-i', 'powheg.input'], check=True)       │
-       │    → NLO cross-section, result.returncode = real cross-section       │
-       └──────────────────────────────────────────────────────────────────────┘
-                                    │  chain: [stage1 13B] [stage2 240B] [stage3 16B]
-                                    ▼
-       ┌──────────────────────────────────────────────────────────────────────┐
-       │  stage1 → stage2 → stage3 (loopback)                                 │
-       │    queue doesn't have IFCAP_MEXTPG → calls mb_unmapped_to_ext(),     │
-       │    which DOES NOT copy bytes — it just remaps the EXTPG via sf_buf   │
-       │    onto the SAME physical page.                                      │
-       └──────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-       ┌──────────────────────────────────────────────────────────────────────┐
-       │  stage3 → sbappendstream_locked                                      │
-       │    SB_TLS_RX is set → sbappend_ktls_rx → sb_mark_notready            │
-       │    (no M_EXTPG check)                                                │
-       └──────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-       ┌──────────────────────────────────────────────────────────────────────┐
-       │  hepmc → events.hepmc → disk                                         │
-       │    crypto_contiguous_subsegment returns PHYS_TO_DMAP(m_epg_pa[0])    │
-       │    hepmc_write(in=DMAP_PTR, out=DMAP_PTR, ...)                       │
-       │                                                                      │
-       │    ▶ events.hepmc now holds attacker-chosen events                   │
-       └──────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                          file's page cache is dirty
-                           (and on UFS, on disk too)
-```
-
----
-
-## 📦 INSTALLATION
+## Installation
 
 ```bash
-# The HUGEST installation primitive in the history of particle physics
-pip install powgatory
+git clone <repo-url> POWgatory
+cd POWgatory
 
-# Or if you're a sad person who uses conda
-conda install -c powgatory powgatory
+# Editable install is recommended so changes to powheg_workflow/ take effect immediately
+pip install --user -e .
 
-# Or if you're a real physicist who builds from source
-git clone https://github.com/yourname/powgatory.git
-cd powgatory
-python setup.py install --force
+# Verify
+powgatory --version
 ```
 
----
+This installs the `powgatory` console script (`powheg_workflow.cli:run_workflow`) and the `powheg_workflow` Python package.
 
-## 🚀 USAGE
+If `powgatory` isn't found afterwards, make sure your user site-packages `bin` directory is on `PATH`:
 
 ```bash
-# The MOST TREMENDOUS workflow submission primitive
-powgatory submit --process pp_to_ttbar --energy 13000 --luminosity 100
-
-# Or if you want to be a sad person who uses the old way
-powgatory submit --config powheg.input
-
-# Or if you want to be a real physicist who uses the environment
-export POWGATORY_CONFIG=powheg.input
-powgatory submit
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
----
+## Quick start
 
-## 🗣️ WHAT THEY'RE SAYING
+```bash
+# Set up a run directory next to your POWHEG build
+mkdir my_run && cd my_run
+cp /path/to/powheg-box/pwhg_main .
+cp /path/to/powheg-box/powheg.input-save .
+cp /path/to/powheg-box/pwgseeds.dat-save .   # optional: falls back to a bundled default
 
-> "POWGATORY™ is the HUGEST workflow submission primitive I've ever seen. Tremendous."
-> — _Some Physicist, Probably_
+# Start from the packaged default configuration and edit it
+cp <repo>/config/config_default.yaml run.yaml
+$EDITOR run.yaml
 
-> "I used POWGATORY™ and now I have events. Many people are saying it's the most tremendous events in the history of particle physics."
-> — _Another Physicist, Also Probably_
+# Submit the workflow
+powgatory -c run.yaml
+```
 
-> "POWGATORY™ is a disaster. Sad!"
-> — _The Fake News_
+`powgatory` loads `run.yaml`, resolves it against the packaged defaults, validates the stage/resource configuration (printing warnings for inconsistent setups), and hands the resulting task graph to b2luigi/Slurm.
 
----
+## Pipeline architecture
 
-## ❓ FAQ FOR CONFUSED JOURNALISTS
+Each stage is executed by a fixed sequence of internal b2luigi tasks (`powheg_workflow/tasks.py`):
 
-**Q: What is POWGATORY?**  
-A: It's a workflow submission primitive. Tremendous.
+1. **`POWHEGPresubmit`** — runs `job_settings.presubmit` once, locally, before anything else (skipped if empty).
+2. **`POWHEGStageSetup`** — writes that stage's `powheg.input` by copying `powheg_input_template` and patching in the stage's `powheg_parameters` (values are rewritten in place; unrecognized parameters are appended with a comment).
+3. **`POWHEGcreateSymlinks`** — symlinks `powheg.input` and `pwgseeds.dat` (from `powheg_seeds_template`) into the run directory for that stage.
+4. **`POWHEGStage`** — the actual POWHEG execution, one instance per parallel branch (seed). This is the task that carries all Slurm/container/local-execution settings and is fanned out by `POWHEGStageWrapper` across `resources.ntasks` branches.
+5. **`POWHEGStageTimings`** — once all branches for a stage/grid-iteration are done, scans their job logs for start/finish markers, records per-seed timing statistics into `timings.yaml`, and is what the next stage actually depends on (i.e. it is the join point of the DAG, not an optional side report).
 
-**Q: Is it dangerous?**  
-A: Yes. 13/10 severity.
+Stage 1 (grid generation) runs `grid_iterations` times sequentially; stage 2 waits for all of stage 1's iterations; stages 3 and 4 each wait for the previous stage. `POWHEGWorkflow` requires only the highest enabled stage's `POWHEGStageTimings`, since everything before it is pulled in transitively.
 
-**Q: Can I use it?**  
-A: Yes. But you need 197 IQ and 15% of your patience.
+```
+POWHEGStage1(grid=1) → POWHEGStage1(grid=2) → POWHEGStage1(grid=3)
+                                                      │
+                                                      ▼
+                                               POWHEGStage2
+                                                      │
+                                                      ▼
+                                               POWHEGStage3
+                                                      │
+                                                      ▼
+                                               POWHEGStage4
+```
 
-**Q: Why "POWGATORY"?**  
-A: POWHEG + Purgatory.
+`POWHEGWorkflow_multiple_configs` lets a single CLI invocation submit several independent `run.yaml`s at once.
 
-**Q: Is this a real tool?**  
-A: Yes. Is it a joke? Also yes. Many people are saying both.
+A failed POWHEG run inside `POWHEGStage` does not currently fail the b2luigi task — the subprocess error is logged via `publish_message()` and swallowed, so `POWHEGStage.complete()` (which checks for the presence of the expected output files, not an exit code) is the actual source of truth for whether a branch succeeded. Stale output files from a previous failed/killed attempt are moved into `incomplete_run_backups/` before each run so POWHEG (which refuses to overwrite an existing event file) doesn't choke on them.
 
----
+## Configuration reference
 
-## 📞 CONTACT
+`run.yaml` is merged against `config/config_default.yaml`; any key you omit falls back to the packaged default. The default file, reproduced here as the schema reference:
 
-If you have questions, complaints, or want to report a bug, please submit a ticket. Many people are saying tickets are the most tremendous way to communicate.
+```yaml
+powheg_executable: "./pwhg_main"
+powheg_input_template: "powheg.input-save"
+powheg_seeds_template: "pwgseeds.dat-save"   # optional; falls back to a bundled seeds file
 
-**Email:** `linder@mpp.mpg.de` (sad, but effective)
+job_settings:
+  job_name: "powheg"
+  mail_type: "None"
+  mail_user: ""
+  run_dir: "powheg_output"          # where POWHEG runs and writes output
+  log_dir: "powheg_output/logs"     # where job logs are written
+  exclude_nodes: ""                 # comma-separated list of nodes to exclude
+  container_image: ""               # registry URL (oras://...), local .sif path, or empty for no container
+  presubmit: ""                     # shell command run once before the workflow starts
 
-**GitHub:** `https://github.com/yourname/powgatory` (the fake news won't show you this)
+stages:
+  stage1:
+    enabled: true
+    grid_iterations: 3
+    resources: {batch_system: slurm, submission_type: array, ntasks: 1, time: "24:00:00", partition: alma}
+    powheg_parameters: {ncall1: 500}
+  stage2:
+    enabled: true
+    resources: {ntasks: 3, time: "24:00:00", partition: alma}
+  stage3:
+    enabled: true
+  stage4:
+    enabled: true
 
----
+resources:                          # global fallback; any key missing from a stage's own `resources` is taken from here
+  batch_system: slurm                # "local" (GNU-parallel-style subprocess execution) or "slurm"
+  submission_type: array             # Slurm only: "single", "array", or "mpi"
+  partition: alma
+  ntasks: 1
+  time: "24:00:00"
+  mem: 4000
 
-## 📜 LICENSE
+powheg_parameters:                  # global fallback for per-stage powheg_parameters
+  # ncall1: 20000
+  # ncall2: 20000
+  # nubound: 10000
+  # numevts: 1000
+```
 
-POWGATORY™ is licensed under the GNU GENERAL PUBLIC LICENSE.
+Notes:
 
----
+- `resources` fields are merged **key by key**, not block-by-block: a stage that only overrides `ntasks` still inherits `batch_system`, `submission_type`, `partition`, `time`, and `mem` from the global block.
+- `batch_system: local` ignores `partition` and runs each branch as a local subprocess instead of submitting to Slurm (useful for testing without cluster access).
+- `container_image` accepts a registry URL (pulled once into `<run_dir>/powheg.sif` via `apptainer pull`), a local file path (copied into the run directory), or an empty string to run without a container.
+- The config file also defines `stage3.grid_combination`, a `stage3_gridcombine` stage, and `analysis`/`addweights` stages. **These are configuration placeholders only** — see [Known limitations](#known-limitations).
 
-**POWGATORY™** — The HUGEST, the MOST TREMENDOUS POWHEG workflow submission primitive in the history of particle physics. Many people are saying it. _Many_. Believe me.
+## Batch submission details
 
-👑🚀👑
+Per-stage Slurm behavior is controlled by `resources.submission_type`:
+
+- **`single`** — one independent `sbatch` submission per branch.
+- **`array`** — all branches for a stage submitted as one Slurm job array.
+- **`mpi`** — all branches submitted as a single multi-node Slurm job, dispatched via `srun`/`$SLURM_PROCID`. Sizing information (nodes, CPUs, memory, time limit) for the stage's partition is queried live from `sinfo` at config-load time (not hand-maintained per-cluster config files) and exposed via `POWHEGStage.partition_info`.
+
+`POWHEGConfig` also uses this live `sinfo` data to warn (not fail) if a stage's requested `resources.time` exceeds its partition's actual Slurm time limit.
+
+Job submission is deliberately throttled: `cli.py` monkey-patches b2luigi's `SlurmProcess.start_job` to enforce a minimum interval between `sbatch` calls, to avoid overwhelming the scheduler when submitting large numbers of jobs.
+
+Use `--workers` to control how many jobs b2luigi keeps submitted/running concurrently (default 250) — this replaced an earlier per-cluster `max_parallel_jobs` setting.
+
+## Container support
+
+If `job_settings.container_image` is set, `POWHEGStage` runs POWHEG inside Apptainer:
+
+- A registry reference (anything containing `://`, e.g. `oras://...`) is pulled once into `<run_dir>/powheg.sif`.
+- A local path is copied into `<run_dir>/powheg.sif`.
+- An existing `<run_dir>/powheg.sif` is reused as-is.
+- An empty value runs POWHEG directly, with no container.
+
+Only the actual POWHEG-execution task (`POWHEGStage`) runs inside the container; setup/symlink/timing tasks always run locally as plain Python.
+
+## CLI reference
+
+```
+powgatory -c run.yaml [run2.yaml ...] [OPTIONS]
+
+Options:
+  -c, --config_file FILE [FILE ...]   Path to one or more run.yaml files (required)
+  --workers N                         Number of parallel b2luigi workers (default: 250)
+  --dry-run                           Print what would be submitted, without submitting
+  -v, --verbose                       Print the resolved configuration file path(s)
+  --version                           Print the installed version and exit
+```
+
+Any additional arguments are passed through to b2luigi/luigi.
+
+## Run directory layout
+
+Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
+
+- `bootstrap.sh` — generated per-run from `config/bootstrap.sh`; sourced at the start of every batch job. Prints diagnostic job info and sources an optional `<run_dir>/.env` for user environment setup (module loads, library paths, etc.).
+- `task_files/` — b2luigi's generated submission scripts.
+- `logs/<job_code>/` — POWHEG stdout/stderr per branch, bracketed with `<Started-POWHEG:...>`/`<Finished-POWHEG:...>` markers that `POWHEGStageTimings` parses.
+- `timings.yaml` — per-stage timing statistics (shortest/longest/average/total), updated as each stage completes.
+- `incomplete_run_backups/` — output files quarantined from a previous failed or killed attempt.
+- POWHEG's own output files (`pwg*.dat`, `pwgevents-*.lhe`, ...) and the `powheg.input`/`pwgseeds.dat` symlinks, written directly into the run directory.
+
+## Troubleshooting
+
+- **`powgatory: command not found`** — check `pip show powheg-workflow` and that your Python user-bin directory is on `PATH`.
+- **A stage silently doesn't run** — check the validation warnings printed at startup; they catch the common cases (e.g. a later stage enabled while its prerequisite is disabled).
+- **`Unknown submission type: mpi`** — your installed `b2luigi` doesn't yet support MPI-style submission; see [Requirements](#requirements).
+- **Container pull fails** — `setup_container()` shells out to `apptainer pull`; check that `apptainer` is on `PATH` on the submission host and that the registry URL is reachable.
+- **A branch seems stuck / never completes** — `POWHEGStage.complete()` is based on POWHEG's own output files, not an exit code, so check the branch's log under `logs/<job_code>/` for the actual failure; a failed `run()` currently does not surface as a b2luigi task failure.
+
+## Known limitations
+
+This reflects the current state of the code, so gaps are documented rather than hidden:
+
+- `stage3.grid_combination`, the `stage3_gridcombine` stage, and the `analysis`/`addweights` stages are all present in the configuration schema but have **no corresponding task implementation** — enabling them has no effect. `powheg_workflow/scrap.py` contains an old, unused draft of this work and is not imported anywhere.
+- `setup.py` has a few stale details left over from earlier iterations of the project: it registers the `powgatory` console script but the CLI's own `--help` text still says `powheg-workflow`; its `classifiers` claim an Apache license while the repository ships GPLv3 (see below); and its `package_data` references `config/clusters/` and `config/scripts/`, neither of which exist in the current layout.
+- `submission_type: mpi` depends on unreleased `b2luigi` functionality (see [Requirements](#requirements)).
+
+## License
+
+GNU General Public License v3.0 — see [LICENSE](LICENSE).
