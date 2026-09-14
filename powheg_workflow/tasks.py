@@ -333,13 +333,20 @@ class POWHEGStage(POWHEGBaseTask):
     def submission_type(self) -> str:
         """
         b2luigi setting, i.e. overwrite of b2luigi.set_setting("submission_type", <value>) for this task.
-        # TODO: Make it a parameter of the config file.
 
         Returns:
-            Submission type for this task. "array" for array jobs, "single" for single jobs.
+            Submission type for this task, as configured per stage: "single", "array", or "mpi".
         """
-        # return str(self.config["cluster_config"]["slurm"]["submission_type"])
-        return "array"
+        return self.config["stages"][self.stage]["resources"]["submission_type"]
+
+    @property
+    def partition_info(self) -> Dict[str, Any]:
+        """
+        sinfo-derived info (node count, CPUs, memory, time limit, ...) for this stage's partition.
+        Needed once submission_type == "mpi" is selected, to size the multi-node job.
+        """
+        partition = self.config["stages"][self.stage]["resources"]["partition"]
+        return self.config["cluster_config"]["slurm"][partition]
 
     @property
     def task_cmd_additional_args(self) -> List[str]:
@@ -456,13 +463,10 @@ class POWHEGStage(POWHEGBaseTask):
         """
         b2luigi setting, i.e. overwrite of b2luigi.set_setting("batch_system", <value>) for this task.
 
-        Return the batch system to use for this task.
-        If cluster is set to 'local', 'local' otherwise 'slurm'.
+        Returns:
+            Batch system to use for this task, as configured per stage ("local" or "slurm").
         """
-        if self.config["stages"][self.stage]["resources"]["cluster"] == "local":
-            return "local"
-        else:
-            return "slurm"
+        return self.config["stages"][self.stage]["resources"]["batch_system"]
 
     @property
     def slurm_settings(self) -> Dict[str, Any]:
@@ -470,9 +474,9 @@ class POWHEGStage(POWHEGBaseTask):
         b2luigi setting, i.e. overwrite of b2luigi.set_setting("slurm_settings", <value>) for this task.
 
         SLURM-specific settings for the batch submission.
-        If cluster is set to 'local', this returns an empty dictionary.
+        If batch_system is set to 'local', this returns an empty dictionary.
         """
-        if self.config["stages"][self.stage]["resources"]["cluster"] == "local":
+        if self.batch_system == "local":
             return {}
         else:
             job_time      = self.config["stages"][self.stage]["resources"]["time"]

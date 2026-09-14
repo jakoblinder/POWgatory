@@ -105,6 +105,13 @@ Examples:
         action='store_true'
     )
 
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=250,
+        help='Number of parallel b2luigi workers (concurrently submitted/running jobs) to use.'
+    )
+
     return parser
 
 
@@ -148,11 +155,11 @@ def run_workflow():
         print(f"\nDry run - would execute:")
         for config in configs:
             print(f"  Config:   {config['config_file']}")
-            print(f"  Cluster:  {config.get('cluster', 'mpi')}")
             print(f"  Enabled stages:")
             for stage, settings in config.get('stages', {}).items():
                 if isinstance(settings, dict) and settings.get('enabled', False):
-                    print(f"    - {stage}")
+                    resources = settings['resources']
+                    print(f"    - {stage} (batch_system={resources['batch_system']}, submission_type={resources['submission_type']})")
                 elif settings is True:
                     print(f"    - {stage}")
             print()
@@ -161,16 +168,6 @@ def run_workflow():
     # Update sys.argv for b2luigi, removing our custom arguments
     sys.argv = b2luigi_args
 
-
-    # number of workers == number of parallel tasks to run.
-    # TODO: Make this a command line argument again with different default values depending on wether slurm or local is used.
-    def get_max_workers(config):
-        try:
-            return config["cluster_config"]["slurm"]["max_parallel_jobs"]
-        except KeyError:
-            return config["cluster_config"]["local"]["max_parallel_jobs"]
-
-    max_workers = max(get_max_workers(config) for config in configs)
 
     program_version = __version__.replace('.', '-')  # Replace . with hyphen for environment variable compatibility
     config_dict     = primary_config.to_dict()  # Convert to dictionary for serialization
@@ -185,6 +182,6 @@ def run_workflow():
         workflow = POWHEGWorkflow(version=program_version, config=config_dict)
 
     # Run tasks using b2luigi with ignore_additional_command_line_args=True
-    b2luigi.process(workflow, workers=max_workers, ignore_additional_command_line_args=True, dry_run=args.dry_run)
+    b2luigi.process(workflow, workers=args.workers, ignore_additional_command_line_args=True, dry_run=args.dry_run)
 
     return 0

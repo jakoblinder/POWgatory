@@ -8,11 +8,11 @@ import os
 import yaml
 import sys
 import subprocess
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 class POWHEGConfig:
     """
-    Configuration manager that loads run.yaml and cluster configs.
+    Configuration manager that loads run.yaml and queries live per-partition Slurm info.
     """
 
     def __init__(self, **kwargs):
@@ -49,23 +49,6 @@ class POWHEGConfig:
         self["job_settings"]["run_dir"].mkdir(exist_ok=True)
         self["job_settings"]["log_dir"].mkdir(exist_ok=True)
 
-        # Load cluster configuration
-        cluster_name = self.get('cluster', 'mpi')
-        cluster_config_path = self.config['config_dir'] / f"clusters/{cluster_name}.yaml"
-
-        if cluster_config_path.exists():
-            with open(cluster_config_path, 'r') as f:
-                self["cluster_config"] = yaml.safe_load(f)
-        else:
-            # Default cluster config if not found
-            # TODO: Update to use local cluster config from local.yaml.
-            self["cluster_config"] = {
-                'cluster_type': cluster_name,
-                'tasks_per_node': 64,
-                'slurm': {'default_time': '24:00:00'},
-                'partition': 'alma',
-            }
-
         # Complete resources and powheg_parameters information for each stage,
         # so that each staage has its own resources and powheg_parameters,
         # either from the stage-specific config or from the global defaults.
@@ -82,6 +65,19 @@ class POWHEGConfig:
                 for param in self["powheg_parameters"]:
                     if param not in self["stages"][stage]["powheg_parameters"]:
                         self["stages"][stage]["powheg_parameters"][param] = self["powheg_parameters"][param]
+
+        # Cluster configuration is queried live from Slurm rather than hand-maintained, since a
+        # stage's partition is now resolved above. Skip the query entirely for fully-local runs,
+        # where sinfo isn't available.
+        requires_slurm = any(
+            stage_config.get("enabled", False) and stage_config["resources"]["batch_system"] == "slurm"
+            for stage_config in self["stages"].values()
+        )
+
+        self["cluster_config"] = {"slurm": {}, "local": {}}
+        if requires_slurm:
+            # Query available partition info from sinfo (hardcoded for now; to be made configurable later)
+            self.get_partition_info()
 
         if not self["job_settings"]["exclude_nodes"]:
             self["job_settings"]["exclude_nodes"] = []
@@ -117,6 +113,43 @@ class POWHEGConfig:
             config_dict["resources"] = {}
 
         return config_dict
+
+    def get_partition_info(self) -> None:
+        """
+        Query `sinfo` for the number of nodes, CPUs, memory, and time limit available per
+        partition, and store the result in cluster_config["slurm"].
+        # TODO: Make this configurable (e.g. skip the query if the config file already
+        # provides this info, or let it be overridden from there).
+        """
+        output = subprocess.check_output(["sinfo", "--noheader", "-o", "%P %D %c %z %m %l"]).decode()
+
+        partition_info: Dict[str, Dict[str, Any]] = {}
+        for line in output.strip().splitlines():
+            partition, nodes, cpus, sct, memory, time_limit = line.split()
+            partition = partition.rstrip("*")  # sinfo marks the default partition with "*"
+
+            entry = partition_info.setdefault(
+                partition,
+                {"nodes": 0, "cpus": int(cpus), "sct": sct, "memory": memory, "time_limit": time_limit},
+            )
+            entry["nodes"] += int(nodes)  # sinfo lists one row per node state within a partition
+
+        self["cluster_config"]["slurm"] = partition_info
+
+    @staticmethod
+    def _parse_slurm_time(time_str: str) -> Optional[int]:
+        """
+        Parse a Slurm-style time limit ("HH:MM:SS", "D-HH:MM:SS", or "UNLIMITED"/"infinite")
+        into a number of seconds, or None if unlimited.
+        """
+        if time_str.strip().lower() in ("unlimited", "infinite", "infinite*"):
+            return None
+        if "-" in time_str:
+            days, hms = time_str.split("-")
+            h, m, s = map(int, hms.split(":"))
+            return int(days) * 86400 + h * 3600 + m * 60 + s
+        h, m, s = map(int, time_str.split(":"))
+        return h * 3600 + m * 60 + s
 
     def setup_environment(self):
         """Configure environment variables for LAW tasks."""
@@ -228,38 +261,29 @@ class POWHEGConfig:
 
         # Make sure the time limits are valid for each stage
         for stage_name, stage_config in stages.items():
-            if stage_config['enabled']:
-                time_limit = stage_config['resources']['time']
-                # Validate time limit format (HH:MM:SS)
-                try:
-                    if '-' in time_limit:
-                        days, hms = time_limit.split('-')
-                        h, m, s = map(int, hms.split(':'))
-                        total_seconds = int(days) * 86400 + h * 3600 + m * 60 + s
-                    else:
-                        h, m, s = map(int, time_limit.split(':'))
-                        total_seconds = h * 3600 + m * 60 + s
-                    if total_seconds <= 0:
-                        warnings.append(f"WARNING: Stage {stage_name} has non-positive time limit: {time_limit}")
+            if not stage_config['enabled']:
+                continue
 
-                    # Make sure its smaller than the cluster default time limit
-                    cluster_time_limit = self['cluster_config'].get('slurm', 'local')['time_limit']
-                    # cluster_time_limit is None if there is not time limit.
+            time_limit = stage_config['resources']['time']
+            try:
+                total_seconds = self._parse_slurm_time(time_limit)
+            except ValueError:
+                warnings.append(f"WARNING: Stage {stage_name} has invalid time limit format: {time_limit} (expected HH:MM:SS)")
+                continue
 
-                    if cluster_time_limit != None:
-                        if '-' in time_limit:
-                            days, hms = cluster_time_limit.split('-')
-                            h, m, s = map(int, hms.split(':'))
-                            cluster_total_seconds = int(days) * 86400 + h * 3600 + m * 60 + s
-                        else:
-                            h, m, s = map(int, cluster_time_limit.split(':'))
-                            cluster_total_seconds = h * 3600 + m * 60 + s
+            if total_seconds is not None and total_seconds <= 0:
+                warnings.append(f"WARNING: Stage {stage_name} has non-positive time limit: {time_limit}")
 
-                        if total_seconds > cluster_total_seconds:
-                            raise ValueError(f"WARNING: Stage {stage_name} time limit {time_limit} exceeds cluster default {cluster_time_limit}")
+            if stage_config['resources']['batch_system'] == 'slurm':
+                partition = stage_config['resources']['partition']
+                partition_time_limit = self['cluster_config']['slurm'][partition]['time_limit']
+                partition_seconds = self._parse_slurm_time(partition_time_limit)
 
-                except ValueError:
-                    warnings.append(f"WARNING: Stage {stage_name} has invalid time limit format: {time_limit} (expected HH:MM:SS)")
+                if partition_seconds is not None and total_seconds is not None and total_seconds > partition_seconds:
+                    warnings.append(
+                        f"WARNING: Stage {stage_name} time limit {time_limit} exceeds partition "
+                        f"'{partition}' limit {partition_time_limit}"
+                    )
 
         return warnings
 

@@ -38,7 +38,8 @@ stages:
     enabled: true
     grid_iterations: 3                 # Grid optimization iterations
     resources:
-      cluster: mpi
+      batch_system: slurm
+      submission_type: array
       ntasks: 1
       time: "24:00:00"
       partition: alma
@@ -84,8 +85,9 @@ stages:
 # For local execution, only 'ntasks' is used (time/partition are ignored).
 # GNU parallel runs up to 4 jobs concurrently by default.
 resources:
-  cluster: mpi                        # Cluster: local, mpi, viper, raven
+  batch_system: slurm                 # Batch system: local or slurm
                                       # Use 'local' for testing with GNU parallel. (The partition is then ignored.)
+  submission_type: array              # Slurm submission type: single, array, or mpi
   partition: alma
   ntasks: 1
   time: "24:00:00"
