@@ -70,7 +70,7 @@ cp /path/to/powheg-box/powheg.input-save .
 cp /path/to/powheg-box/pwgseeds.dat-save .   # optional: falls back to a bundled default
 
 # Start from the packaged default configuration and edit it
-cp <repo>/config/config_default.yaml run.yaml
+cp <repo>/config/example.yaml run.yaml
 $EDITOR run.yaml
 
 # Submit the workflow
@@ -110,7 +110,7 @@ A failed POWHEG run inside `POWHEGStage` does not currently fail the b2luigi tas
 
 ## Configuration reference
 
-`run.yaml` is merged against `config/config_default.yaml`; any key you omit falls back to the packaged default. The default file, reproduced here as the schema reference:
+`run.yaml` is merged against `config/config_default.yaml`, which ships only the minimal set of keys needed to run and is reproduced below as the schema reference. `config/example.yaml` is a fuller, commented example built on top of the same schema — including per-stage `resources`/`powheg_parameters` overrides — and is the recommended starting point for a real run (see [Quick start](#quick-start)).
 
 ```yaml
 powheg_executable: "./pwhg_main"
@@ -131,34 +131,59 @@ stages:
   stage1:
     enabled: true
     grid_iterations: 3
-    resources: {batch_system: slurm, submission_type: array, ntasks: 1, time: "24:00:00", partition: alma}
-    powheg_parameters: {ncall1: 500}
   stage2:
     enabled: true
-    resources: {ntasks: 3, time: "24:00:00", partition: alma}
   stage3:
     enabled: true
   stage4:
     enabled: true
 
-resources:                          # global fallback; any key missing from a stage's own `resources` is taken from here
+resources:                          # applies to every stage unless overridden per stage (see below)
   batch_system: slurm                # "local" (GNU-parallel-style subprocess execution) or "slurm"
   submission_type: array             # Slurm only: "single", "array", or "mpi"
   partition: alma
-  ntasks: 1
+  ntasks: 1                          # seeds run in parallel (array jobs) or MPI tasks (mpi jobs)
   time: "24:00:00"
   mem: 4000
 
-powheg_parameters:                  # global fallback for per-stage powheg_parameters
+powheg_parameters:                  # applies to every stage unless overridden per stage (see below)
   # ncall1: 20000
   # ncall2: 20000
   # nubound: 10000
   # numevts: 1000
 ```
 
-Notes:
+### Global vs. per-stage settings
 
-- `resources` fields are merged **key by key**, not block-by-block: a stage that only overrides `ntasks` still inherits `batch_system`, `submission_type`, `partition`, `time`, and `mem` from the global block.
+Both `resources` and `powheg_parameters` can be set once at the top level, applying to every stage, **and/or** overridden for an individual stage under `stages.<stage>.resources` / `stages.<stage>.powheg_parameters`. Overrides are merged **key by key**, not block-by-block: a stage that only sets one key still inherits every other key from the top-level block. `config/example.yaml` demonstrates this — a larger global `ntasks` for most stages, with `stage1` cut down to a single grid-generation task and its own `ncall1`:
+
+```yaml
+resources:
+  batch_system: slurm
+  submission_type: array
+  partition: alma
+  ntasks: 10                        # used by stage2/stage3/stage4, which don't override it
+  time: "24:00:00"
+  mem: 4000
+
+stages:
+  stage1:
+    enabled: true
+    grid_iterations: 3
+    resources:
+      ntasks: 1                     # overrides ntasks just for stage1; batch_system/partition/time/mem still inherited
+    powheg_parameters:
+      ncall1: 500                   # overrides ncall1 just for stage1
+  stage2:
+    enabled: true
+    resources:
+      ntasks: 3                     # overrides ntasks just for stage2
+      time: "24:00:00"
+      partition: alma
+```
+
+Further notes:
+
 - `batch_system: local` ignores `partition` and runs each branch as a local subprocess instead of submitting to Slurm (useful for testing without cluster access).
 - `container_image` accepts a registry URL (pulled once into `<run_dir>/powheg.sif` via `apptainer pull`), a local file path (copied into the run directory), or an empty string to run without a container.
 - The config file also defines `stage3.grid_combination`, a `stage3_gridcombine` stage, and `analysis`/`addweights` stages. **These are configuration placeholders only** — see [Known limitations](#known-limitations).

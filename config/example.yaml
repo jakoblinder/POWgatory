@@ -37,9 +37,21 @@ stages:
   stage1:
     enabled: true
     grid_iterations: 3                 # Grid optimization iterations
+    resources:
+      batch_system: slurm
+      submission_type: array
+      ntasks: 1
+      time: "24:00:00"
+      partition: alma
+    powheg_parameters:
+      ncall1: 500
 
   stage2:
     enabled: true
+    resources:
+      ntasks: 3
+      time: "24:00:00"
+      partition: alma
 
   stage3:
     enabled: true
@@ -49,7 +61,7 @@ stages:
     enabled: false
     use_tmp: true                      # Use local /tmp for speed
     resources:
-      ntasks: 3                        # Grid combination: 3 seeds only
+      ntasks: 3                          # Grid combination: 3 seeds only
       time: "4:00:00"
 
   stage4:
@@ -77,7 +89,7 @@ resources:
                                       # Use 'local' for testing with GNU parallel. (The partition is then ignored.)
   submission_type: array              # Slurm submission type: single, array, or mpi
   partition: alma
-  ntasks: 1                           # Number of seeds to run in parallel (array jobs) or number of MPI tasks (mpi jobs)
+  ntasks: 10                          # Number of seeds to run in parallel (array jobs) or number of MPI tasks (mpi jobs)
   time: "24:00:00"
   mem: 4000
 
