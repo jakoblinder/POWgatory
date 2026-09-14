@@ -127,7 +127,8 @@ class POWHEGConfig:
         for line in output.strip().splitlines():
             partition, nodes, cpus, sct, memory, time_limit = line.split()
             partition = partition.rstrip("*")  # sinfo marks the default partition with "*"
-
+            cpus = cpus.rstrip("+")  # sinfo marks a lower-bound value with "+" when grouped nodes' CPU counts differ
+                                     # Note that this is a delicate situation and can cause problems.
             entry = partition_info.setdefault(
                 partition,
                 {"nodes": 0, "cpus": int(cpus), "sct": sct, "memory": memory, "time_limit": time_limit},
