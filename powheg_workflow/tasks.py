@@ -25,7 +25,7 @@ import yaml
 # from .config import POWHEGConfig
 
 # Import our framework classes
-from .framework import POWHEGBaseTask, POWHEGWrapper_template
+from .framework import POWHEGBaseTask, POWHEGWrapperTask
 from .config import POWHEGConfig
 
 
@@ -74,7 +74,7 @@ class POWHEGPresubmit(POWHEGBaseTask):
 
     def requires(self):
         # Depend on setup task for this grid iteration.
-        yield POWHEGcreateSymlinks(
+        yield POWHEGCreateSymlinks(
             stage          = self.stage,
             grid_iteration = self.grid_iteration,
             version        = self.version,
@@ -194,25 +194,8 @@ class POWHEGStageSetup(POWHEGBaseTask):
         with open(dest_file, "w") as file:
             file.write("".join(new_lines))
 
-    @staticmethod
-    def parse_template_file(src: Path, dest: Path, replacements: Dict[str, Any]):
-        """Parse template file with Python % formatting."""
-        # FIXME: Do we still need this function? It isn't used anywhere in the current codebase.
-        with open(src, 'r') as f:
-            content = f.read()
-        content = content % replacements
-        with open(dest, 'w') as f:
-            f.write(content)
 
-    # def get_scripts(self):
-    #     """Copy scripts to the output directory."""
-    #     for script in ["pwhg_run.sh"]:
-    #         src  = self.config["script_dir"] / script
-    #         dest = self.local_path(script)
-    #         shutil.copy2(src, dest)
-
-
-class POWHEGcreateSymlinks(POWHEGBaseTask):
+class POWHEGCreateSymlinks(POWHEGBaseTask):
     """
     Create symlinks for POWHEG input and seeds.
     This task is used to ensure that the correct input files are linked for POWHEG execution.
@@ -436,7 +419,7 @@ class POWHEGStage(POWHEGBaseTask):
             This replaces the relative setting of the python script which 'add_filename_to_cmd == True' would use.
         """
         this_file_path = Path(__file__).resolve()
-        main_file      = this_file_path.parent.parent / "please_work.py"
+        main_file      = this_file_path.parent.parent / "run_workflow.py"
         return [str(main_file),]
 
     @property
@@ -511,7 +494,7 @@ class POWHEGStage(POWHEGBaseTask):
 
     def requires(self):
         """Depend on setup task for this grid iteration."""
-        yield POWHEGcreateSymlinks(
+        yield POWHEGCreateSymlinks(
             stage          = self.stage,
             grid_iteration = self.grid_iteration,
             version        = self.version,
@@ -884,7 +867,7 @@ class POWHEGStageTimings(POWHEGBaseTask):
         self.publish_message(f"Wrote timing summary to {output_target}")
 
 
-class POWHEGStageWrapper(POWHEGWrapper_template):
+class POWHEGStageWrapper(POWHEGWrapperTask):
     """
     Wrapper task for a POWHEG stage, yielding multiple parallel tasks.
     """
@@ -911,7 +894,7 @@ class POWHEGStageWrapper(POWHEGWrapper_template):
 ######################
 # Main Workflow Task #
 ######################
-class POWHEGWorkflow(POWHEGWrapper_template):
+class POWHEGWorkflow(POWHEGWrapperTask):
     """
     Define the main workflow task that coordinates all stages.
     Depending on the configuration, it will yield the appropriate stage tasks.
@@ -942,7 +925,7 @@ class POWHEGWorkflow(POWHEGWrapper_template):
             yield POWHEGStageTimings(stage=self.get_stage_str(highest_stage), version=self.version, config=self.config)
 
 
-class POWHEGWorkflow_multiple_configs(POWHEGWrapper_template):
+class POWHEGMultiConfigWorkflow(POWHEGWrapperTask):
     configuration_files = b2luigi.ListParameter(hashed=True, description="List of POWHEG configuration files to run.")
 
     def requires(self):

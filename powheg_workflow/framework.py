@@ -304,24 +304,8 @@ class POWHEGBaseTask(Task):
 
         return f"{self.stage_code(stage, grid)}-s{seed}"
 
-    def get_job_time(self) -> str:
-        """
-        Get the maximum runtime for the job in SLURM format (HH:MM:SS).
-        Currently hardcoded to 24 hours, but can be made configurable.
-        """
 
-        max_runtime = 24
-        # Calculate time in SLURM format (HH:MM:SS) - max 23:59:59
-        total_seconds = min(int(max_runtime * 3600), 86399)  # Cap at 23:59:59
-        hours    = total_seconds // 3600
-        minutes  = (total_seconds % 3600) // 60
-        seconds  = total_seconds % 60
-        job_time = f"{hours}:{minutes:02d}:{seconds:02d}"
-
-        return job_time
-
-
-class POWHEGWrapper_template(b2luigi.WrapperTask):
+class POWHEGWrapperTask(b2luigi.WrapperTask):
     """
     Main workflow task that orchestrates all stages.
 

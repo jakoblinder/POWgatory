@@ -9,7 +9,7 @@ readme_path = Path(__file__).parent / 'README.md'
 long_description = readme_path.read_text() if readme_path.exists() else ''
 
 setup(
-    name='powheg-workflow',
+    name='powgatory',
     version='2.0.0',
     description='POWHEG-BOX workflow orchestration using b2luigi',
     long_description=long_description,

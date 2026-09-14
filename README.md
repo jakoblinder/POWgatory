@@ -85,7 +85,7 @@ Each stage is executed by a fixed sequence of internal b2luigi tasks (`powheg_wo
 
 1. **`POWHEGPresubmit`** — runs `job_settings.presubmit` once, locally, before anything else (skipped if empty).
 2. **`POWHEGStageSetup`** — writes that stage's `powheg.input` by copying `powheg_input_template` and patching in the stage's `powheg_parameters` (values are rewritten in place; unrecognized parameters are appended with a comment).
-3. **`POWHEGcreateSymlinks`** — symlinks `powheg.input` and `pwgseeds.dat` (from `powheg_seeds_template`) into the run directory for that stage.
+3. **`POWHEGCreateSymlinks`** — symlinks `powheg.input` and `pwgseeds.dat` (from `powheg_seeds_template`) into the run directory for that stage.
 4. **`POWHEGStage`** — the actual POWHEG execution, one instance per parallel branch (seed). This is the task that carries all Slurm/container/local-execution settings and is fanned out by `POWHEGStageWrapper` across `resources.ntasks` branches.
 5. **`POWHEGStageTimings`** — once all branches for a stage/grid-iteration are done, scans their job logs for start/finish markers, records per-seed timing statistics into `timings.yaml`, and is what the next stage actually depends on (i.e. it is the join point of the DAG, not an optional side report).
 
@@ -104,7 +104,7 @@ POWHEGStage1(grid=1) → POWHEGStage1(grid=2) → POWHEGStage1(grid=3)
                                                POWHEGStage4
 ```
 
-`POWHEGWorkflow_multiple_configs` lets a single CLI invocation submit several independent `run.yaml`s at once.
+`POWHEGMultiConfigWorkflow` lets a single CLI invocation submit several independent `run.yaml`s at once.
 
 A failed POWHEG run inside `POWHEGStage` does not currently fail the b2luigi task — the subprocess error is logged via `publish_message()` and swallowed, so `POWHEGStage.complete()` (which checks for the presence of the expected output files, not an exit code) is the actual source of truth for whether a branch succeeded. Stale output files from a previous failed/killed attempt are moved into `incomplete_run_backups/` before each run so POWHEG (which refuses to overwrite an existing event file) doesn't choke on them.
 
@@ -241,7 +241,7 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 
 ## Troubleshooting
 
-- **`powgatory: command not found`** — check `pip show powheg-workflow` and that your Python user-bin directory is on `PATH`.
+- **`powgatory: command not found`** — check `pip show powgatory` and that your Python user-bin directory is on `PATH`.
 - **A stage silently doesn't run** — check the validation warnings printed at startup; they catch the common cases (e.g. a later stage enabled while its prerequisite is disabled).
 - **`Unknown submission type: mpi`** — your installed `b2luigi` doesn't yet support MPI-style submission; see [Requirements](#requirements).
 - **Container pull fails** — `setup_container()` shells out to `apptainer pull`; check that `apptainer` is on `PATH` on the submission host and that the registry URL is reachable.
@@ -252,7 +252,7 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 This reflects the current state of the code, so gaps are documented rather than hidden:
 
 - `stage3.grid_combination`, the `stage3_gridcombine` stage, and the `analysis`/`addweights` stages are all present in the configuration schema but have **no corresponding task implementation** — enabling them has no effect. `powheg_workflow/scrap.py` contains an old, unused draft of this work and is not imported anywhere.
-- `setup.py` has a few stale details left over from earlier iterations of the project: it registers the `powgatory` console script but the CLI's own `--help` text still says `powheg-workflow`; its `classifiers` claim an Apache license while the repository ships GPLv3 (see below); and its `package_data` references `config/clusters/` and `config/scripts/`, neither of which exist in the current layout.
+- `setup.py` has a few stale details left over from earlier iterations of the project: its `classifiers` claim an Apache license while the repository ships GPLv3 (see below); and its `package_data` references `config/clusters/` and `config/scripts/`, neither of which exist in the current layout.
 - `submission_type: mpi` depends on unreleased `b2luigi` functionality (see [Requirements](#requirements)).
 
 ## License

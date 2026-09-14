@@ -5,9 +5,9 @@ POWHEG-BOX b2luigi Workflow Manager
 This CLI provides workflow orchestration for POWHEG using b2luigi.
 
 Usage:
-    powheg-workflow -c config.yaml                          # Run full workflow
-    powheg-workflow -c config1.yaml config2.yaml            # Run multiple workflows
-    powheg-workflow -c config.yaml --dry-run                # Show what would be done
+    powgatory -c config.yaml                          # Run full workflow
+    powgatory -c config1.yaml config2.yaml            # Run multiple workflows
+    powgatory -c config.yaml --dry-run                # Show what would be done
 """
 
 import argparse
@@ -68,13 +68,13 @@ SlurmProcess.start_job = _throttled_start_job
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser."""
     parser = argparse.ArgumentParser(
-        prog='powheg-workflow',
+        prog='powgatory',
         description='POWHEG-BOX Workflow Manager using b2luigi',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  powheg-workflow -c config.yaml                      Run full workflow
-  powheg-workflow -c config.yaml --dry-run            Show what would be done
+  powgatory -c config.yaml                      Run full workflow
+  powgatory -c config.yaml --dry-run            Show what would be done
 
 '''
     )
@@ -117,7 +117,7 @@ Examples:
 
 def run_workflow():
     """Main entry point for the CLI - parses arguments and runs the workflow."""
-    from .tasks import POWHEGWorkflow, POWHEGWorkflow_multiple_configs
+    from .tasks import POWHEGWorkflow, POWHEGMultiConfigWorkflow
 
     # Parse custom arguments while ignoring b2luigi batch-runner arguments.
     parser = create_parser()
@@ -127,10 +127,10 @@ def run_workflow():
     b2luigi_args = [sys.argv[0], *b2luigi_args]
 
     if args.version:
-        print(f"powheg-workflow version {__version__}")
+        print(f"powgatory version {__version__}")
         return 0
     else:
-        print(f"Start powheg-workflow ({__version__})")
+        print(f"Start powgatory ({__version__})")
 
     config_files = [Path(config_file).resolve() for config_file in args.config_file]
     if not config_files:
@@ -173,7 +173,7 @@ def run_workflow():
     config_dict     = primary_config.to_dict()  # Convert to dictionary for serialization
 
     if multiple_configs:
-        workflow = POWHEGWorkflow_multiple_configs(
+        workflow = POWHEGMultiConfigWorkflow(
                         version             = program_version,
                         configuration_files = [str(config_file) for config_file in config_files],
                     )
