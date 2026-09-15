@@ -20,9 +20,10 @@ class POWHEGConfig:
          Args:
 
         """
-        self.config = POWHEGConfig.get_defaults()
-        # Override defaults with provided kwargs
-        self.config.update(kwargs)
+        # Merge provided kwargs onto the defaults, recursively, so that a nested override
+        # (e.g. a "resources" block missing a key like "max_grouping_size") doesn't wipe out
+        # the sibling defaults for that same section.
+        self.config = POWHEGConfig._deep_merge(POWHEGConfig.get_defaults(), kwargs)
 
         if "cwd" not in self.config:
             # Put the directory where the workflow is run into the config, so that tasks can use it.
@@ -90,6 +91,17 @@ class POWHEGConfig:
         print(f"Configuration loaded from {self['config_file']}:")
         for key, value in self.items():
             print(f"  {key}: {value}")
+
+    @staticmethod
+    def _deep_merge(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+        """Recursively merge `overrides` onto `base`, without dropping base keys that `overrides` doesn't set."""
+        merged = dict(base)
+        for key, value in overrides.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = POWHEGConfig._deep_merge(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
 
     @staticmethod
     def get_defaults():
