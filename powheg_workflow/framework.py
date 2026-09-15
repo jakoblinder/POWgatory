@@ -260,7 +260,7 @@ class POWHEGBaseTask(Task):
             if len(seed) <= 5:
                 seed_str = "-".join([f"s{b}" for b in seed])
             else:
-                seed_str = "to".join(["s" + str(min(seed)), "s" + str(max(seed))])
+                seed_str = "to".join(["s" + str(min(seed)), str(max(seed))])
         else:
             seed_str = str(seed)
 
