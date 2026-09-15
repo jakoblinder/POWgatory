@@ -260,7 +260,7 @@ class POWHEGBaseTask(Task):
             if len(seed) <= 5:
                 seed_str = "-".join([f"s{b}" for b in seed])
             else:
-                seed_str = "to".join([str(min(seed)), str(max(seed))])
+                seed_str = "to".join(["s" + str(min(seed)), "s" + str(max(seed))])
         else:
             seed_str = str(seed)
 
@@ -302,7 +302,7 @@ class POWHEGBaseTask(Task):
         else:
             seed = str(seed)
 
-        return f"{self.stage_code(stage, grid)}-s{seed}"
+        return f"{self.stage_code(stage, grid)}-{seed}"
 
 
 class POWHEGWrapperTask(b2luigi.WrapperTask):

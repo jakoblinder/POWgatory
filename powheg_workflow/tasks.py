@@ -437,7 +437,7 @@ class POWHEGStage(POWHEGBaseTask):
 
         Returns the name of the job.
         """
-        return f"{self.config['job_settings']['job_name']}_{self.stage_name}_s{self.format_branch_id(self.branch_id)}"
+        return f"{self.config['job_settings']['job_name']}_{self.stage_name}_{self.format_branch_id(self.branch_id)}"
 
     @property
     def batch_system(self) -> str:
