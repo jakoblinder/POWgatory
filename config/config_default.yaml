@@ -76,6 +76,7 @@ resources:
   batch_system: slurm                 # Batch system: local or slurm
                                       # Use 'local' for testing with GNU parallel. (The partition is then ignored.)
   submission_type: array              # Slurm submission type: single, array, or mpi
+  max_grouping_size: 1000             # Maximum number of tasks to group together in a single job submission
   partition: alma
   ntasks: 1                           # Number of seeds to run in parallel (array jobs) or number of MPI tasks (mpi jobs)
   time: "24:00:00"
