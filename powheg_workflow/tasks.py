@@ -308,7 +308,7 @@ class POWHEGStage(POWHEGBaseTask):
         Returns:
             The maximum number of tasks to group together.
         """
-        return int(self.config["cluster_config"]["resources"]["max_grouping_size"])
+        return int(self.config["stages"][self.stage]["resources"]["max_grouping_size"])
 
     @property
     def submission_type(self) -> str:
