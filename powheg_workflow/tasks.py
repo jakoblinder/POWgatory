@@ -649,7 +649,7 @@ class POWHEGStage(POWHEGBaseTask):
         """Execute POWHEG for this task."""
         if apptainer_image:
             self.publish_message(f"Running POWHEG in container: {apptainer_image}")
-            cmd = ["apptainer", "exec", str(apptainer_image)]
+            cmd = ["apptainer", "exec", "--bind", f"{self.config["cwd"]}:{self.config["cwd"]}", str(apptainer_image)]
         else:
             cmd = ["exec", ]
 
