@@ -576,28 +576,38 @@ class POWHEGStage(POWHEGBaseTask):
         # Execute POWHEG
         self._run_powheg(job_code=job_code, task_id=self.branch_id, apptainer_image=container)
 
-        if self.stage_number == 1:
-            output = self.local_path(f"pwg-xg{self.grid_iteration}-xgrid-btl-{self.branch_id:04d}.dat")
-        else:
-            output = self.local_path(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat")
-
-        for _ in range(10):
-            try:
-                filesize = os.path.getsize(output)
-            except OSError as err:
-                filesize = 0
-                print("OS error: {0}".format(err))
-
-            if filesize > 0:
-                self.publish_message(f"Output file {output} created successfully with size {filesize} bytes.")
-                break
-            else:
-                self.publish_message(f"Output file {output} is empty or not created yet. Retrying...")
-                time.sleep(5)
+        self._wait_for_stage_output()
 
         #     # Mark complete
         #     with self.output().open('w') as f:
         #         f.write(f"{self.stage} completed for branch {self.branch_id}\n")
+
+    def _wait_for_stage_output(self, retries=10, delay=5):
+        """
+        Poll until one of the possible output target sets is fully written.
+
+        On cluster filesystems, output files can take a moment to become visible
+        on this node after POWHEG has written them on another, so a non-zero size
+        is required, not just existence.
+        """
+        for _ in range(retries):
+            for target_set in self.output():
+                try:
+                    sizes = [os.path.getsize(target.path) for target in target_set]
+                except OSError:
+                    continue
+
+                if all(size > 0 for size in sizes):
+                    self.publish_message(f"Output files ready: {[target.path for target in target_set]}")
+                    return
+
+            self.publish_message("Expected output files not created yet. Retrying...")
+            time.sleep(delay)
+
+        raise RuntimeError(
+            f"Output files for stage {self.stage_number}, branch {self.branch_id} "
+            f"never appeared after {retries} retries."
+        )
 
     def _quarantine_stale_outputs(self):
         """
