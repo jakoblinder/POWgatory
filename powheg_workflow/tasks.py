@@ -761,7 +761,7 @@ class POWHEGStageTimings(POWHEGBaseTask):
 
     def _log_files(self) -> List[Path]:
         log_dir = Path(self.get_log_file_dir()).resolve()
-        log_prefix = f"{self.stage_code(self.stage, self.grid_iteration)}-s"
+        log_prefix = f"{self.stage_code(self.stage, self.grid_iteration)}-"
         return sorted(log_dir.glob(f"{log_prefix}*.log"))
 
     @staticmethod
