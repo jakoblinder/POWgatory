@@ -377,7 +377,7 @@ class POWHEGStage(POWHEGBaseTask):
         """
         log_dir  = str(super().get_log_file_dir())
         # Use formatted seed for log file names:
-        job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id, format_seed=True)
+        job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id, format_seed=False)
 
         return f"{log_dir}/{job_code}"
 

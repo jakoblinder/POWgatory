@@ -262,7 +262,7 @@ class POWHEGBaseTask(Task):
             else:
                 seed_str = "to".join(["s" + str(min(seed)), str(max(seed))])
         else:
-            seed_str = str(seed)
+            seed_str = f"s{seed}"
 
         return seed_str
 
@@ -300,7 +300,7 @@ class POWHEGBaseTask(Task):
         if format_seed:
             seed = self.format_branch_id(seed)
         else:
-            seed = str(seed)
+            seed = f"s{seed}"
 
         return f"{self.stage_code(stage, grid)}-{seed}"
 
