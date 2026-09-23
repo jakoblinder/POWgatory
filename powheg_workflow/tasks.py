@@ -539,15 +539,26 @@ class POWHEGStage(POWHEGBaseTask):
                 #
                 [self.local_target(f"pwggridinfo-btl-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),
                  self.local_target(f"pwggridinfo-rmn-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),],
+                # Consider the case of having POWHEGs manyseed argument beeing bigger than 9999 and, which results in the branch_id being bigger than 9999 and thus the output files having a 5-digit number instead of a 4-digit number.
+                [self.local_target(f"pwg-xg{self.grid_iteration}-xgrid-btl-{self.branch_id:05d}.dat"),
+                 self.local_target(f"pwg-{self.branch_id:05d}-xg{self.grid_iteration}-stat.dat"),],
+                #
+                [self.local_target(f"pwggridinfo-btl-xg{self.grid_iteration}-{self.branch_id:05d}.dat"),
+                 self.local_target(f"pwggridinfo-rmn-xg{self.grid_iteration}-{self.branch_id:05d}.dat"),],
             ]
         elif self.stage_number == 4:
             return [
                 [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),
                  self.local_target(f"pwgevents-{self.branch_id:04d}.lhe"),],
+                # Consider the case of having POWHEGs manyseed argument beeing bigger than 9999 and, which results in the branch_id being bigger than 9999 and thus the output files having a 5-digit number instead of a 4-digit number.
+                [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:05d}.dat"),
+                 self.local_target(f"pwgevents-{self.branch_id:05d}.lhe"),],
             ]
         else:
             return [
                 [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),],
+                # Consider the case of having POWHEGs manyseed argument beeing bigger than 9999 and, which results in the branch_id being bigger than 9999 and thus the output files having a 5-digit number instead of a 4-digit number.
+                [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:05d}.dat"),],
             ]
 
     def complete(self):
