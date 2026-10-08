@@ -152,17 +152,39 @@ class POWHEGConfig:
     @staticmethod
     def _parse_slurm_time(time_str: str) -> Optional[int]:
         """
-        Parse a Slurm-style time limit ("HH:MM:SS", "D-HH:MM:SS", or "UNLIMITED"/"infinite")
-        into a number of seconds, or None if unlimited.
+        Parse a Slurm-style time limit into a number of seconds, or None if unlimited.
+
+        Accepts every format Slurm uses (e.g. sinfo prints "30:00" for a 30 minute limit):
+        "MM", "MM:SS", "HH:MM:SS", "D-HH", "D-HH:MM", "D-HH:MM:SS", and "UNLIMITED"/"infinite".
+        Raises ValueError for anything else.
         """
-        if time_str.strip().lower() in ("unlimited", "infinite", "infinite*"):
+        time_str = time_str.strip()
+        if time_str.lower() in ("unlimited", "infinite", "infinite*"):
             return None
+
+        days = 0
         if "-" in time_str:
-            days, hms = time_str.split("-")
-            h, m, s = map(int, hms.split(":"))
-            return int(days) * 86400 + h * 3600 + m * 60 + s
-        h, m, s = map(int, time_str.split(":"))
-        return h * 3600 + m * 60 + s
+            days_str, time_str = time_str.split("-")
+            days = int(days_str)
+            # With a day count, the fields are hours[:minutes[:seconds]].
+            fields = [int(field) for field in time_str.split(":")]
+            if not 1 <= len(fields) <= 3:
+                raise ValueError(f"Invalid Slurm time format: {time_str}")
+            h, m, s = (fields + [0, 0])[:3]
+        else:
+            # Without a day count, the fields are [[hours:]minutes:]seconds, except that a
+            # single number means minutes.
+            fields = [int(field) for field in time_str.split(":")]
+            if len(fields) == 1:
+                h, m, s = 0, fields[0], 0
+            elif len(fields) == 2:
+                h, (m, s) = 0, fields
+            elif len(fields) == 3:
+                h, m, s = fields
+            else:
+                raise ValueError(f"Invalid Slurm time format: {time_str}")
+
+        return days * 86400 + h * 3600 + m * 60 + s
 
     def setup_environment(self):
         """Configure environment variables for LAW tasks."""
@@ -289,6 +311,12 @@ class POWHEGConfig:
 
             if stage_config['resources']['batch_system'] == 'slurm':
                 partition = stage_config['resources']['partition']
+                if partition not in self['cluster_config']['slurm']:
+                    available = ", ".join(sorted(self['cluster_config']['slurm']))
+                    raise ValueError(
+                        f"ERROR: Stage {stage_name} uses partition '{partition}', which sinfo does not "
+                        f"report on this cluster. Available partitions: {available}"
+                    )
                 partition_time_limit = self['cluster_config']['slurm'][partition]['time_limit']
                 partition_seconds = self._parse_slurm_time(partition_time_limit)
 

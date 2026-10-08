@@ -31,13 +31,17 @@ A POWHEG-BOX calculation runs in several sequential stages (grid generation, int
 
 ## Requirements
 
-- Python 3.10+ (the codebase and its dependencies use modern Python features; `setup.py` currently advertises `>=3.7`, which is stale — see [Known limitations](#known-limitations)).
-- [`b2luigi`](https://b2luigi.readthedocs.io/) and `luigi` (installed automatically as dependencies).
+- Python 3.11+ (required by the `b2luigi` version below).
+- [`b2luigi`](https://b2luigi.readthedocs.io/) with Slurm array/MPI submission support (see below) and `luigi`.
 - A Slurm cluster for anything beyond local testing (`sinfo`, `sbatch`, `squeue`, `scancel` must be on `PATH`).
 - [Apptainer](https://apptainer.org/) if you want containerized execution (optional).
 - A working POWHEG-BOX build (`pwhg_main` or equivalent) and its input/seed templates.
 
-**Important:** `submission_type: mpi` (multi-node Slurm jobs, see [Batch submission details](#batch-submission-details)) requires a version of `b2luigi` that implements MPI-style submission. This support is not yet part of any released `b2luigi` version — if you see an `Unknown submission type` error, you need the development checkout of `b2luigi` that added it, not the PyPI package pinned in `setup.py`.
+**Important:** `submission_type: array` (the default) and `submission_type: mpi` (see [Batch submission details](#batch-submission-details)) require a version of `b2luigi` that implements the `submission_type` setting for Slurm. This support is not yet part of any released `b2luigi` version; it lives on the `slurm_array_submission` branch of [jakoblinder/b2luigi](https://github.com/jakoblinder/b2luigi/tree/slurm_array_submission). With the PyPI package pinned in `setup.py`, `submission_type` is silently ignored and grouped branches are not submitted as arrays. Install the fork into the same environment, e.g.:
+
+```bash
+pip install -e /path/to/b2luigi   # checkout of the slurm_array_submission branch
+```
 
 ## Installation
 
@@ -106,7 +110,7 @@ POWHEGStage1(grid=1) → POWHEGStage1(grid=2) → POWHEGStage1(grid=3)
 
 `POWHEGMultiConfigWorkflow` lets a single CLI invocation submit several independent `run.yaml`s at once.
 
-A failed POWHEG run inside `POWHEGStage` does not currently fail the b2luigi task — the subprocess error is logged via `publish_message()` and swallowed, so `POWHEGStage.complete()` (which checks for the presence of the expected output files, not an exit code) is the actual source of truth for whether a branch succeeded. Stale output files from a previous failed/killed attempt are moved into `incomplete_run_backups/` before each run so POWHEG (which refuses to overwrite an existing event file) doesn't choke on them.
+A failed POWHEG run inside `POWHEGStage` (non-zero exit code) raises a `RuntimeError`, which fails that branch's b2luigi task. A branch that exits cleanly but whose output files never appear also fails, after a short polling window that allows for slow cluster filesystems. `POWHEGStage.complete()` checks for the expected POWHEG output files, not an exit code; both 4-digit (`-0042`) and 5-digit (`-12345`) seed suffixes are accepted, so runs with more than 9999 seeds work. Stale output files from a previous failed/killed attempt are moved into `incomplete_run_backups/` before each run so POWHEG (which refuses to overwrite an existing event file) doesn't choke on them.
 
 ## Configuration reference
 
@@ -245,7 +249,8 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 - **A stage silently doesn't run** — check the validation warnings printed at startup; they catch the common cases (e.g. a later stage enabled while its prerequisite is disabled).
 - **`Unknown submission type: mpi`** — your installed `b2luigi` doesn't yet support MPI-style submission; see [Requirements](#requirements).
 - **Container pull fails** — `setup_container()` shells out to `apptainer pull`; check that `apptainer` is on `PATH` on the submission host and that the registry URL is reachable.
-- **A branch seems stuck / never completes** — `POWHEGStage.complete()` is based on POWHEG's own output files, not an exit code, so check the branch's log under `logs/<job_code>/` for the actual failure; a failed `run()` currently does not surface as a b2luigi task failure.
+- **A branch fails with `POWHEG failed: ...` or `Output files ... never appeared`** — check the branch's POWHEG log under `logs/<job_code>/` for the actual failure. Re-running `powgatory` resubmits only the branches whose output files are missing.
+- **`Stage ... uses partition '...', which sinfo does not report`** — the `resources.partition` of that stage doesn't exist on the cluster you're submitting from; the message lists the partitions that do.
 
 ## Known limitations
 
@@ -253,7 +258,8 @@ This reflects the current state of the code, so gaps are documented rather than 
 
 - `stage3.grid_combination`, the `stage3_gridcombine` stage, and the `analysis`/`addweights` stages are all present in the configuration schema but have **no corresponding task implementation** — enabling them has no effect. `powheg_workflow/scrap.py` contains an old, unused draft of this work and is not imported anywhere.
 - `setup.py` has a few stale details left over from earlier iterations of the project: its `classifiers` claim an Apache license while the repository ships GPLv3 (see below); and its `package_data` references `config/clusters/` and `config/scripts/`, neither of which exist in the current layout.
-- `submission_type: mpi` depends on unreleased `b2luigi` functionality (see [Requirements](#requirements)).
+- `submission_type: array` and `mpi` depend on unreleased `b2luigi` functionality (see [Requirements](#requirements)).
+- For `submission_type: mpi`, the live `sinfo` data in `POWHEGStage.partition_info` is not yet passed on to b2luigi; b2luigi packs sub-tasks onto nodes using its own `tasks_per_node` setting (default 64), which must match the partition.
 
 ## License
 

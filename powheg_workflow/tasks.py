@@ -670,7 +670,7 @@ class POWHEGStage(POWHEGBaseTask):
         """Execute POWHEG for this task."""
         if apptainer_image:
             self.publish_message(f"Running POWHEG in container: {apptainer_image}")
-            cmd = ["apptainer", "exec", "--bind", f"{self.config["cwd"]}:{self.config["cwd"]}", str(apptainer_image)]
+            cmd = ["apptainer", "exec", "--bind", f"{self.config['cwd']}:{self.config['cwd']}", str(apptainer_image)]
         else:
             # No prefix: the job script is run directly. Process replacement is the
             # script's own job (pwhg_run.sh execs POWHEG), since "exec" is a shell
