@@ -211,10 +211,11 @@ class POWHEGConfig:
                 config_dict = yaml.safe_load(f)
             config_dict['config_file'] = str(config_file)
 
-            if config_dict["powheg_parameters"] == None:
-                config_dict["powheg_parameters"] = {}
-            if config_dict["resources"] == None:
-                config_dict["resources"] = {}
+            # A block that is missing, or present with every entry commented out (parsed as None),
+            # falls back to the defaults via the deep merge in __init__.
+            for key in ["powheg_parameters", "resources"]:
+                if config_dict.get(key) is None:
+                    config_dict[key] = {}
 
             return cls(**config_dict)
 
