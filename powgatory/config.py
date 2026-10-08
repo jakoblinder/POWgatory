@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-POWHEG-BOX LAW Workflow configuration file manager
+POWHEG-BOX b2luigi workflow configuration manager
 
 """
 from pathlib import Path
@@ -8,7 +8,7 @@ import os
 import yaml
 import sys
 import subprocess
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 class POWHEGConfig:
     """
@@ -17,8 +17,9 @@ class POWHEGConfig:
 
     def __init__(self, **kwargs):
         """
-         Args:
-
+        Args:
+            **kwargs: Configuration entries, usually the parsed run.yaml (see from_yaml).
+                      They are merged onto the defaults from config/config_default.yaml.
         """
         # Merge provided kwargs onto the defaults, recursively, so that a nested override
         # (e.g. a "resources" block missing a key like "max_grouping_size") doesn't wipe out
@@ -27,12 +28,12 @@ class POWHEGConfig:
 
         if "cwd" not in self.config:
             # Put the directory where the workflow is run into the config, so that tasks can use it.
-            # Do it only ones so that if its part of the config file, it is not overwritten.
+            # Do it only once, so that it is not overwritten if it is part of the config file.
             self.config["cwd"] = Path.cwd()
 
         if "python" not in self.config:
             # Put the path to the python executable into the config, so that tasks can use it.
-            # Do it only ones so that if its part of the config file, it is not overwritten.
+            # Do it only once, so that it is not overwritten if it is part of the config file.
             self.config["python"] = Path(sys.executable)
 
 
@@ -51,7 +52,7 @@ class POWHEGConfig:
         self["job_settings"]["log_dir"].mkdir(exist_ok=True)
 
         # Complete resources and powheg_parameters information for each stage,
-        # so that each staage has its own resources and powheg_parameters,
+        # so that each stage has its own resources and powheg_parameters,
         # either from the stage-specific config or from the global defaults.
         for stage in self["stages"].keys():
             if "resources" not in self["stages"][stage]:
@@ -189,7 +190,7 @@ class POWHEGConfig:
         return days * 86400 + h * 3600 + m * 60 + s
 
     def setup_environment(self):
-        """Configure environment variables for LAW tasks."""
+        """Configure environment variables and the bootstrap script for the tasks."""
         os.environ['POWHEG_RUN_DIR']     = str(self['job_settings']['run_dir'])
         os.environ['POWHEG_LOG_DIR']     = str(self['job_settings']['log_dir'])
 

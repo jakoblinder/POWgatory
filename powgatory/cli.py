@@ -12,19 +12,18 @@ Usage:
 
 import argparse
 import sys
-import os
+import threading
+import time
 from pathlib import Path
 
 import b2luigi
+from b2luigi.batch.processes.slurm import SlurmProcess
 
-# Import validation function
 from .config import POWHEGConfig
 from . import __version__
 
 # This block makes sure that jobs are scheduled with a 2 second wait.
 # It monkey patches the b2luigi SlurmProcess class
-import threading, time
-from b2luigi.batch.processes.slurm import SlurmProcess
 
 
 _original_start_job = SlurmProcess.start_job
@@ -152,10 +151,10 @@ def run_workflow():
             print(f"Configuration: {primary_config['config_file']}")
 
     if args.dry_run:
-        print(f"\nDry run - would execute:")
+        print("\nDry run - would execute:")
         for config in configs:
             print(f"  Config:   {config['config_file']}")
-            print(f"  Enabled stages:")
+            print("  Enabled stages:")
             for stage, settings in config.get('stages', {}).items():
                 if isinstance(settings, dict) and settings.get('enabled', False):
                     resources = settings['resources']
@@ -167,7 +166,6 @@ def run_workflow():
 
     # Update sys.argv for b2luigi, removing our custom arguments
     sys.argv = b2luigi_args
-
 
     program_version = __version__.replace('.', '-')  # Replace . with hyphen for environment variable compatibility
     config_dict     = primary_config.to_dict()  # Convert to dictionary for serialization

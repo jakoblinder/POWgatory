@@ -8,21 +8,17 @@ This module implements the POWHEG workflow using b2luigi (BELLE2 Luigi):
 - Container execution via b2luigi
 """
 
-from sys import path
-
 import b2luigi
 import os
 import re
 import time
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 
 import yaml
-
-# from .config import POWHEGConfig
 
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapperTask
@@ -84,8 +80,8 @@ class POWHEGPresubmit(POWHEGBaseTask):
 
 class POWHEGStageSetup(POWHEGBaseTask):
     """
-    Setup task for Stage 1: Creates input file and container.
-    All Stage 1 parallel tasks depend on this completing first.
+    Setup task for a stage (and grid iteration): creates its powheg.input file.
+    All parallel tasks of that stage depend on this completing first.
     """
     batch_system = "local"
 
@@ -105,16 +101,8 @@ class POWHEGStageSetup(POWHEGBaseTask):
         return input_file
 
     def run(self):
-        """Setup container and create input file."""
-        # self.setup_container()
-        # job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=1)
+        """Create the input file."""
         self.create_powheg_input(stage=self.stage, grid=self.grid_iteration)
-
-        # self.get_scripts()
-
-    # def requires(self):
-    #     """Depend on presubmit task."""
-    #     yield POWHEGPresubmit(version=self.version, config=self.config)
 
     def create_powheg_input(self, stage:str, grid: int = 1):
         """
@@ -287,23 +275,24 @@ class POWHEGCreateSymlinks(POWHEGBaseTask):
 
 class POWHEGStage(POWHEGBaseTask):
     """
-    Stage 1: Grid generation with iterations.
+    One POWHEG run (branch/seed) of a stage, and for stage 1 of a grid iteration.
 
-    Each branch represents a parallel task within a grid iteration.
-    Grid iterations are sequential (iteration 2 depends on iteration 1).
+    Each branch represents a parallel task within a stage. Branches of the same stage are
+    grouped into a single batch submission (see branch_id, max_grouping_size, submission_type).
+    Stage 1 grid iterations are sequential (iteration 2 depends on iteration 1).
     """
 
     branch_id = b2luigi.BatchIntParameter(
         default=0,
-        description="Branch ID for this parallel POWHEG execution (0-indexed)",
+        description="Branch ID (seed index) for this parallel POWHEG execution (1 ... ntasks)",
         grouping=True
     )
 
     @property
     def max_grouping_size(self) -> int:
         """
-        Maximum number of tasks to group together in a single batch job.
-        # TODO: Make it a parameter of the config file.
+        Maximum number of tasks to group together in a single batch job,
+        as configured per stage (resources.max_grouping_size).
 
         Returns:
             The maximum number of tasks to group together.
@@ -525,6 +514,9 @@ class POWHEGStage(POWHEGBaseTask):
             and especially produced after having a finished event file.
             We check, however, for the event file 'pwgevents-????.lhe' as well, which is produced in stage 4.
 
+            Each file set exists twice: with a 4-digit seed suffix, and with a 5-digit one, which
+            POWHEG uses for seed indices above 9999 (manyseeds with more than 9999 seeds).
+
         Returns:
             List[List]: Output targets for this task. Each inner list represents a possible set of files that are considered as
                         outputs for the task.
@@ -537,7 +529,7 @@ class POWHEGStage(POWHEGBaseTask):
                 #
                 [self.local_target(f"pwggridinfo-btl-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),
                  self.local_target(f"pwggridinfo-rmn-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),],
-                # Consider the case of having POWHEGs manyseed argument beeing bigger than 9999 and, which results in the branch_id being bigger than 9999 and thus the output files having a 5-digit number instead of a 4-digit number.
+                # Same files with a 5-digit seed suffix (more than 9999 seeds).
                 [self.local_target(f"pwg-xg{self.grid_iteration}-xgrid-btl-{self.branch_id:05d}.dat"),
                  self.local_target(f"pwg-{self.branch_id:05d}-xg{self.grid_iteration}-stat.dat"),],
                 #
@@ -548,14 +540,14 @@ class POWHEGStage(POWHEGBaseTask):
             return [
                 [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),
                  self.local_target(f"pwgevents-{self.branch_id:04d}.lhe"),],
-                # Consider the case of having POWHEGs manyseed argument beeing bigger than 9999 and, which results in the branch_id being bigger than 9999 and thus the output files having a 5-digit number instead of a 4-digit number.
+                # Same files with a 5-digit seed suffix (more than 9999 seeds).
                 [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:05d}.dat"),
                  self.local_target(f"pwgevents-{self.branch_id:05d}.lhe"),],
             ]
         else:
             return [
                 [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),],
-                # Consider the case of having POWHEGs manyseed argument beeing bigger than 9999 and, which results in the branch_id being bigger than 9999 and thus the output files having a 5-digit number instead of a 4-digit number.
+                # Same files with a 5-digit seed suffix (more than 9999 seeds).
                 [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:05d}.dat"),],
             ]
 
@@ -570,7 +562,7 @@ class POWHEGStage(POWHEGBaseTask):
         return False
 
     def run(self):
-        """Execute one task of Stage 1."""
+        """Execute POWHEG for this branch and wait until its output files are written."""
         self._quarantine_stale_outputs()
 
         container = self.setup_container()
@@ -586,10 +578,6 @@ class POWHEGStage(POWHEGBaseTask):
         self._run_powheg(job_code=job_code, task_id=self.branch_id, apptainer_image=container)
 
         self._wait_for_stage_output()
-
-        #     # Mark complete
-        #     with self.output().open('w') as f:
-        #         f.write(f"{self.stage} completed for branch {self.branch_id}\n")
 
     def _wait_for_stage_output(self, retries=10, delay=5):
         """
@@ -827,7 +815,6 @@ class POWHEGStageTimings(POWHEGBaseTask):
         longest  = max(timings, key=lambda entry: entry["elapsed_seconds"])
         average_seconds = sum(entry["elapsed_seconds"] for entry in timings) / len(timings)
         total_absolute_seconds = sum(entry["elapsed_seconds"] for entry in timings)
-        total_cpu_hours        = total_absolute_seconds / 3600.0
 
         output_target = self.output()
         timings_data = {}

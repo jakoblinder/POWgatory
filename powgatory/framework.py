@@ -7,8 +7,6 @@ that leverage b2luigi for workflow orchestration.
 """
 
 import os
-import math
-import sys
 import shutil
 import luigi
 import b2luigi
@@ -48,7 +46,7 @@ class Task(b2luigi.Task):
     def local_path(self, *path):
         """
         Build local path for task outputs.
-        Uses POWHEG_OUTPUT_DIR environment variable or current directory.
+        Relative to base_path(), i.e. the run directory from the configuration.
         Arguments:
             *path (list[str]): Additional path components.
         """
@@ -186,7 +184,7 @@ class POWHEGBaseTask(Task):
             return POWHEGConfig(**self.config)
 
     def get_log_file_dir(self):
-        # Directorry where b2luigi task and log files are stored
+        # Directory where b2luigi task and log files are stored
         path = os.path.join(self.config["job_settings"]["log_dir"])
         return path
 
