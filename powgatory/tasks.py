@@ -8,24 +8,20 @@ This module implements the POWHEG workflow using b2luigi (BELLE2 Luigi):
 - Container execution via b2luigi
 """
 
-from sys import path
-
 import b2luigi
 import os
 import re
 import time
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 
 import yaml
 
-# from .config import POWHEGConfig
-
 # Import our framework classes
-from .framework import POWHEGBaseTask, POWHEGWrapper_template
+from .framework import POWHEGBaseTask, POWHEGWrapperTask
 from .config import POWHEGConfig
 
 
@@ -74,7 +70,7 @@ class POWHEGPresubmit(POWHEGBaseTask):
 
     def requires(self):
         # Depend on setup task for this grid iteration.
-        yield POWHEGcreateSymlinks(
+        yield POWHEGCreateSymlinks(
             stage          = self.stage,
             grid_iteration = self.grid_iteration,
             version        = self.version,
@@ -84,8 +80,8 @@ class POWHEGPresubmit(POWHEGBaseTask):
 
 class POWHEGStageSetup(POWHEGBaseTask):
     """
-    Setup task for Stage 1: Creates input file and container.
-    All Stage 1 parallel tasks depend on this completing first.
+    Setup task for a stage (and grid iteration): creates its powheg.input file.
+    All parallel tasks of that stage depend on this completing first.
     """
     batch_system = "local"
 
@@ -105,16 +101,8 @@ class POWHEGStageSetup(POWHEGBaseTask):
         return input_file
 
     def run(self):
-        """Setup container and create input file."""
-        # self.setup_container()
-        # job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=1)
+        """Create the input file."""
         self.create_powheg_input(stage=self.stage, grid=self.grid_iteration)
-
-        # self.get_scripts()
-
-    # def requires(self):
-    #     """Depend on presubmit task."""
-    #     yield POWHEGPresubmit(version=self.version, config=self.config)
 
     def create_powheg_input(self, stage:str, grid: int = 1):
         """
@@ -194,25 +182,8 @@ class POWHEGStageSetup(POWHEGBaseTask):
         with open(dest_file, "w") as file:
             file.write("".join(new_lines))
 
-    @staticmethod
-    def parse_template_file(src: Path, dest: Path, replacements: Dict[str, Any]):
-        """Parse template file with Python % formatting."""
-        # FIXME: Do we still need this function? It isn't used anywhere in the current codebase.
-        with open(src, 'r') as f:
-            content = f.read()
-        content = content % replacements
-        with open(dest, 'w') as f:
-            f.write(content)
 
-    # def get_scripts(self):
-    #     """Copy scripts to the output directory."""
-    #     for script in ["pwhg_run.sh"]:
-    #         src  = self.config["script_dir"] / script
-    #         dest = self.local_path(script)
-    #         shutil.copy2(src, dest)
-
-
-class POWHEGcreateSymlinks(POWHEGBaseTask):
+class POWHEGCreateSymlinks(POWHEGBaseTask):
     """
     Create symlinks for POWHEG input and seeds.
     This task is used to ensure that the correct input files are linked for POWHEG execution.
@@ -304,16 +275,48 @@ class POWHEGcreateSymlinks(POWHEGBaseTask):
 
 class POWHEGStage(POWHEGBaseTask):
     """
-    Stage 1: Grid generation with iterations.
+    One POWHEG run (branch/seed) of a stage, and for stage 1 of a grid iteration.
 
-    Each branch represents a parallel task within a grid iteration.
-    Grid iterations are sequential (iteration 2 depends on iteration 1).
+    Each branch represents a parallel task within a stage. Branches of the same stage are
+    grouped into a single batch submission (see branch_id, max_grouping_size, submission_type).
+    Stage 1 grid iterations are sequential (iteration 2 depends on iteration 1).
     """
 
-    branch_id = b2luigi.IntParameter(
+    branch_id = b2luigi.BatchIntParameter(
         default=0,
-        description="Branch ID for this parallel POWHEG execution (0-indexed)"
+        description="Branch ID (seed index) for this parallel POWHEG execution (1 ... ntasks)",
+        grouping=True
     )
+
+    @property
+    def max_grouping_size(self) -> int:
+        """
+        Maximum number of tasks to group together in a single batch job,
+        as configured per stage (resources.max_grouping_size).
+
+        Returns:
+            The maximum number of tasks to group together.
+        """
+        return int(self.config["stages"][self.stage]["resources"]["max_grouping_size"])
+
+    @property
+    def submission_type(self) -> str:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("submission_type", <value>) for this task.
+
+        Returns:
+            Submission type for this task, as configured per stage: "single", "array", or "mpi".
+        """
+        return self.config["stages"][self.stage]["resources"]["submission_type"]
+
+    @property
+    def partition_info(self) -> Dict[str, Any]:
+        """
+        sinfo-derived info (node count, CPUs, memory, time limit, ...) for this stage's partition.
+        Needed once submission_type == "mpi" is selected, to size the multi-node job.
+        """
+        partition = self.config["stages"][self.stage]["resources"]["partition"]
+        return self.config["cluster_config"]["slurm"][partition]
 
     @property
     def task_cmd_additional_args(self) -> List[str]:
@@ -398,13 +401,11 @@ class POWHEGStage(POWHEGBaseTask):
         b2luigi setting, i.e. overwrite of b2luigi.set_setting("executable", <value>) for this task.
 
         Returns:
-            Python script to execute for this task, formatted as a list for easy concatenation with other commands.
-            Path to the main entry point of this program.
+            Arguments that make the python executable run this package's entry point (powgatory/__main__.py),
+            formatted as a list for easy concatenation with other commands.
             This replaces the relative setting of the python script which 'add_filename_to_cmd == True' would use.
         """
-        this_file_path = Path(__file__).resolve()
-        main_file      = this_file_path.parent.parent / "please_work.py"
-        return [str(main_file),]
+        return ["-m", "powgatory"]
 
     @property
     def add_filename_to_cmd(self) -> str:
@@ -423,20 +424,17 @@ class POWHEGStage(POWHEGBaseTask):
 
         Returns the name of the job.
         """
-        return f"{self.config['job_settings']['job_name']}_{self.stage_name}_s{self.format_branch_id(self.branch_id)}"
+        return f"{self.config['job_settings']['job_name']}_{self.stage_name}_{self.format_branch_id(self.branch_id)}"
 
     @property
     def batch_system(self) -> str:
         """
         b2luigi setting, i.e. overwrite of b2luigi.set_setting("batch_system", <value>) for this task.
 
-        Return the batch system to use for this task.
-        If cluster is set to 'local', 'local' otherwise 'slurm'.
+        Returns:
+            Batch system to use for this task, as configured per stage ("local" or "slurm").
         """
-        if self.config["stages"][self.stage]["resources"]["cluster"] == "local":
-            return "local"
-        else:
-            return "slurm"
+        return self.config["stages"][self.stage]["resources"]["batch_system"]
 
     @property
     def slurm_settings(self) -> Dict[str, Any]:
@@ -444,9 +442,9 @@ class POWHEGStage(POWHEGBaseTask):
         b2luigi setting, i.e. overwrite of b2luigi.set_setting("slurm_settings", <value>) for this task.
 
         SLURM-specific settings for the batch submission.
-        If cluster is set to 'local', this returns an empty dictionary.
+        If batch_system is set to 'local', this returns an empty dictionary.
         """
-        if self.config["stages"][self.stage]["resources"]["cluster"] == "local":
+        if self.batch_system == "local":
             return {}
         else:
             job_time      = self.config["stages"][self.stage]["resources"]["time"]
@@ -481,7 +479,7 @@ class POWHEGStage(POWHEGBaseTask):
 
     def requires(self):
         """Depend on setup task for this grid iteration."""
-        yield POWHEGcreateSymlinks(
+        yield POWHEGCreateSymlinks(
             stage          = self.stage,
             grid_iteration = self.grid_iteration,
             version        = self.version,
@@ -516,6 +514,9 @@ class POWHEGStage(POWHEGBaseTask):
             and especially produced after having a finished event file.
             We check, however, for the event file 'pwgevents-????.lhe' as well, which is produced in stage 4.
 
+            Each file set exists twice: with a 4-digit seed suffix, and with a 5-digit one, which
+            POWHEG uses for seed indices above 9999 (manyseeds with more than 9999 seeds).
+
         Returns:
             List[List]: Output targets for this task. Each inner list represents a possible set of files that are considered as
                         outputs for the task.
@@ -528,15 +529,26 @@ class POWHEGStage(POWHEGBaseTask):
                 #
                 [self.local_target(f"pwggridinfo-btl-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),
                  self.local_target(f"pwggridinfo-rmn-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),],
+                # Same files with a 5-digit seed suffix (more than 9999 seeds).
+                [self.local_target(f"pwg-xg{self.grid_iteration}-xgrid-btl-{self.branch_id:05d}.dat"),
+                 self.local_target(f"pwg-{self.branch_id:05d}-xg{self.grid_iteration}-stat.dat"),],
+                #
+                [self.local_target(f"pwggridinfo-btl-xg{self.grid_iteration}-{self.branch_id:05d}.dat"),
+                 self.local_target(f"pwggridinfo-rmn-xg{self.grid_iteration}-{self.branch_id:05d}.dat"),],
             ]
         elif self.stage_number == 4:
             return [
                 [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),
                  self.local_target(f"pwgevents-{self.branch_id:04d}.lhe"),],
+                # Same files with a 5-digit seed suffix (more than 9999 seeds).
+                [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:05d}.dat"),
+                 self.local_target(f"pwgevents-{self.branch_id:05d}.lhe"),],
             ]
         else:
             return [
                 [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),],
+                # Same files with a 5-digit seed suffix (more than 9999 seeds).
+                [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:05d}.dat"),],
             ]
 
     def complete(self):
@@ -550,7 +562,7 @@ class POWHEGStage(POWHEGBaseTask):
         return False
 
     def run(self):
-        """Execute one task of Stage 1."""
+        """Execute POWHEG for this branch and wait until its output files are written."""
         self._quarantine_stale_outputs()
 
         container = self.setup_container()
@@ -565,28 +577,34 @@ class POWHEGStage(POWHEGBaseTask):
         # Execute POWHEG
         self._run_powheg(job_code=job_code, task_id=self.branch_id, apptainer_image=container)
 
-        if self.stage_number == 1:
-            output = self.local_path(f"pwg-xg{self.grid_iteration}-xgrid-btl-{self.branch_id:04d}.dat")
-        else:
-            output = self.local_path(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat")
+        self._wait_for_stage_output()
 
-        for _ in range(10):
-            try:
-                filesize = os.path.getsize(output)
-            except OSError as err:
-                filesize = 0
-                print("OS error: {0}".format(err))
+    def _wait_for_stage_output(self, retries=10, delay=5):
+        """
+        Poll until one of the possible output target sets is fully written.
 
-            if filesize > 0:
-                self.publish_message(f"Output file {output} created successfully with size {filesize} bytes.")
-                break
-            else:
-                self.publish_message(f"Output file {output} is empty or not created yet. Retrying...")
-                time.sleep(5)
+        On cluster filesystems, output files can take a moment to become visible
+        on this node after POWHEG has written them on another, so a non-zero size
+        is required, not just existence.
+        """
+        for _ in range(retries):
+            for target_set in self.output():
+                try:
+                    sizes = [os.path.getsize(target.path) for target in target_set]
+                except OSError:
+                    continue
 
-        #     # Mark complete
-        #     with self.output().open('w') as f:
-        #         f.write(f"{self.stage} completed for branch {self.branch_id}\n")
+                if all(size > 0 for size in sizes):
+                    self.publish_message(f"Output files ready: {[target.path for target in target_set]}")
+                    return
+
+            self.publish_message("Expected output files not created yet. Retrying...")
+            time.sleep(delay)
+
+        raise RuntimeError(
+            f"Output files for stage {self.stage_number}, branch {self.branch_id} "
+            f"never appeared after {retries} retries."
+        )
 
     def _quarantine_stale_outputs(self):
         """
@@ -607,7 +625,7 @@ class POWHEGStage(POWHEGBaseTask):
 
         # Stage 4's event file is the known culprit: POWHEG refuses to run if it
         # already exists, even if the run was previously incomplete.
-        move_incomplete_event_files = False # FIXME: Make this configurable in the config file.
+        move_incomplete_event_files = True # FIXME: Make this configurable in the config file.
         if self.stage_number == 4 and move_incomplete_event_files:
             candidate_paths.add(run_dir / f"pwgevents-{self.branch_id:04d}.lhe")
 
@@ -638,9 +656,12 @@ class POWHEGStage(POWHEGBaseTask):
         """Execute POWHEG for this task."""
         if apptainer_image:
             self.publish_message(f"Running POWHEG in container: {apptainer_image}")
-            cmd = ["apptainer", "exec", str(apptainer_image)]
+            cmd = ["apptainer", "exec", "--bind", f"{self.config['cwd']}:{self.config['cwd']}", str(apptainer_image)]
         else:
-            cmd = ["exec", ]
+            # No prefix: the job script is run directly. Process replacement is the
+            # script's own job (pwhg_run.sh execs POWHEG), since "exec" is a shell
+            # builtin and subprocess.run() does not go through a shell.
+            cmd = []
 
         pwhg_main = self.config['powheg_executable']
 
@@ -737,7 +758,7 @@ class POWHEGStageTimings(POWHEGBaseTask):
 
     def _log_files(self) -> List[Path]:
         log_dir = Path(self.get_log_file_dir()).resolve()
-        log_prefix = f"{self.stage_code(self.stage, self.grid_iteration)}-s"
+        log_prefix = f"{self.stage_code(self.stage, self.grid_iteration)}-"
         return sorted(log_dir.glob(f"{log_prefix}*.log"))
 
     @staticmethod
@@ -794,7 +815,6 @@ class POWHEGStageTimings(POWHEGBaseTask):
         longest  = max(timings, key=lambda entry: entry["elapsed_seconds"])
         average_seconds = sum(entry["elapsed_seconds"] for entry in timings) / len(timings)
         total_absolute_seconds = sum(entry["elapsed_seconds"] for entry in timings)
-        total_cpu_hours        = total_absolute_seconds / 3600.0
 
         output_target = self.output()
         timings_data = {}
@@ -854,7 +874,7 @@ class POWHEGStageTimings(POWHEGBaseTask):
         self.publish_message(f"Wrote timing summary to {output_target}")
 
 
-class POWHEGStageWrapper(POWHEGWrapper_template):
+class POWHEGStageWrapper(POWHEGWrapperTask):
     """
     Wrapper task for a POWHEG stage, yielding multiple parallel tasks.
     """
@@ -881,7 +901,7 @@ class POWHEGStageWrapper(POWHEGWrapper_template):
 ######################
 # Main Workflow Task #
 ######################
-class POWHEGWorkflow(POWHEGWrapper_template):
+class POWHEGWorkflow(POWHEGWrapperTask):
     """
     Define the main workflow task that coordinates all stages.
     Depending on the configuration, it will yield the appropriate stage tasks.
@@ -912,7 +932,7 @@ class POWHEGWorkflow(POWHEGWrapper_template):
             yield POWHEGStageTimings(stage=self.get_stage_str(highest_stage), version=self.version, config=self.config)
 
 
-class POWHEGWorkflow_multiple_configs(POWHEGWrapper_template):
+class POWHEGMultiConfigWorkflow(POWHEGWrapperTask):
     configuration_files = b2luigi.ListParameter(hashed=True, description="List of POWHEG configuration files to run.")
 
     def requires(self):

@@ -1,9 +1,0 @@
-# Local Execution Configuration
-cluster_name: local
-
-# Local execution settings
-local:
-  # Limits
-  time_limit: null
-  max_parallel_jobs: 5
-

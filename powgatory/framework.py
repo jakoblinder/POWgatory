@@ -7,8 +7,6 @@ that leverage b2luigi for workflow orchestration.
 """
 
 import os
-import math
-import sys
 import shutil
 import luigi
 import b2luigi
@@ -48,7 +46,7 @@ class Task(b2luigi.Task):
     def local_path(self, *path):
         """
         Build local path for task outputs.
-        Uses POWHEG_OUTPUT_DIR environment variable or current directory.
+        Relative to base_path(), i.e. the run directory from the configuration.
         Arguments:
             *path (list[str]): Additional path components.
         """
@@ -186,7 +184,7 @@ class POWHEGBaseTask(Task):
             return POWHEGConfig(**self.config)
 
     def get_log_file_dir(self):
-        # Directorry where b2luigi task and log files are stored
+        # Directory where b2luigi task and log files are stored
         path = os.path.join(self.config["job_settings"]["log_dir"])
         return path
 
@@ -260,9 +258,9 @@ class POWHEGBaseTask(Task):
             if len(seed) <= 5:
                 seed_str = "-".join([f"s{b}" for b in seed])
             else:
-                seed_str = "to".join([str(min(seed)), str(max(seed))])
+                seed_str = "to".join(["s" + str(min(seed)), str(max(seed))])
         else:
-            seed_str = str(seed)
+            seed_str = f"s{seed}"
 
         return seed_str
 
@@ -300,28 +298,12 @@ class POWHEGBaseTask(Task):
         if format_seed:
             seed = self.format_branch_id(seed)
         else:
-            seed = str(seed)
+            seed = f"s{seed}"
 
-        return f"{self.stage_code(stage, grid)}-s{seed}"
-
-    def get_job_time(self) -> str:
-        """
-        Get the maximum runtime for the job in SLURM format (HH:MM:SS).
-        Currently hardcoded to 24 hours, but can be made configurable.
-        """
-
-        max_runtime = 24
-        # Calculate time in SLURM format (HH:MM:SS) - max 23:59:59
-        total_seconds = min(int(max_runtime * 3600), 86399)  # Cap at 23:59:59
-        hours    = total_seconds // 3600
-        minutes  = (total_seconds % 3600) // 60
-        seconds  = total_seconds % 60
-        job_time = f"{hours}:{minutes:02d}:{seconds:02d}"
-
-        return job_time
+        return f"{self.stage_code(stage, grid)}-{seed}"
 
 
-class POWHEGWrapper_template(b2luigi.WrapperTask):
+class POWHEGWrapperTask(b2luigi.WrapperTask):
     """
     Main workflow task that orchestrates all stages.
 

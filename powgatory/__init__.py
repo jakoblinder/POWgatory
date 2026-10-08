@@ -10,7 +10,7 @@ providing:
 - Single YAML configuration per run
 
 Usage:
-    powheg-workflow run.yaml
+    powgatory -c run.yaml
 
 See README.md for detailed documentation.
 """

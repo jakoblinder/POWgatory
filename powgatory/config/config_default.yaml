@@ -1,7 +1,7 @@
 # POWHEG-BOX Run Configuration
 # Minimal configuration for a POWHEG run
 #
-# Usage: powheg-workflow run.yaml
+# Usage: powgatory run.yaml
 # ============================================================================
 # POWHEG FILES (in current directory)
 # ============================================================================
@@ -26,7 +26,7 @@ job_settings:
   #   - Empty/omit: run directly without container
   container_image: "oras://gitlab-registry.mpcdf.mpg.de/mpp/containers/jlinder/powheg:powheg-latest"
   # Script to be run before POWHEGWorkflow is started.
-  # For a POWHEGWorkflow_multiple_configs this script is run once per config file.
+  # For a POWHEGMultiConfigWorkflow this script is run once per config file.
   # It is run in the workflow submission directory (cwd) and not the run_dir.
   presubmit: ""
 
@@ -37,20 +37,9 @@ stages:
   stage1:
     enabled: true
     grid_iterations: 3                 # Grid optimization iterations
-    resources:
-      cluster: mpi
-      ntasks: 1
-      time: "24:00:00"
-      partition: alma
-    powheg_parameters:
-      ncall1: 500
 
   stage2:
     enabled: true
-    resources:
-      ntasks: 3
-      time: "24:00:00"
-      partition: alma
 
   stage3:
     enabled: true
@@ -60,7 +49,7 @@ stages:
     enabled: false
     use_tmp: true                      # Use local /tmp for speed
     resources:
-      ntasks: 3                          # Grid combination: 3 seeds only
+      ntasks: 3                        # Grid combination: 3 seeds only
       time: "4:00:00"
 
   stage4:
@@ -84,10 +73,12 @@ stages:
 # For local execution, only 'ntasks' is used (time/partition are ignored).
 # GNU parallel runs up to 4 jobs concurrently by default.
 resources:
-  cluster: mpi                        # Cluster: local, mpi, viper, raven
+  batch_system: slurm                 # Batch system: local or slurm
                                       # Use 'local' for testing with GNU parallel. (The partition is then ignored.)
+  submission_type: array              # Slurm submission type: single, array, or mpi
+  max_grouping_size: 1000             # Maximum number of tasks to group together in a single job submission
   partition: alma
-  ntasks: 1
+  ntasks: 1                           # Number of seeds to run in parallel (array jobs) or number of MPI tasks (mpi jobs)
   time: "24:00:00"
   mem: 4000
 

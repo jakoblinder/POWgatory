@@ -5,26 +5,25 @@ POWHEG-BOX b2luigi Workflow Manager
 This CLI provides workflow orchestration for POWHEG using b2luigi.
 
 Usage:
-    powheg-workflow -c config.yaml                          # Run full workflow
-    powheg-workflow -c config1.yaml config2.yaml            # Run multiple workflows
-    powheg-workflow -c config.yaml --dry-run                # Show what would be done
+    powgatory -c config.yaml                          # Run full workflow
+    powgatory -c config1.yaml config2.yaml            # Run multiple workflows
+    powgatory -c config.yaml --dry-run                # Show what would be done
 """
 
 import argparse
 import sys
-import os
+import threading
+import time
 from pathlib import Path
 
 import b2luigi
+from b2luigi.batch.processes.slurm import SlurmProcess
 
-# Import validation function
 from .config import POWHEGConfig
 from . import __version__
 
 # This block makes sure that jobs are scheduled with a 2 second wait.
 # It monkey patches the b2luigi SlurmProcess class
-import threading, time
-from b2luigi.batch.processes.slurm import SlurmProcess
 
 
 _original_start_job = SlurmProcess.start_job
@@ -68,13 +67,13 @@ SlurmProcess.start_job = _throttled_start_job
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser."""
     parser = argparse.ArgumentParser(
-        prog='powheg-workflow',
+        prog='powgatory',
         description='POWHEG-BOX Workflow Manager using b2luigi',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  powheg-workflow -c config.yaml                      Run full workflow
-  powheg-workflow -c config.yaml --dry-run            Show what would be done
+  powgatory -c config.yaml                      Run full workflow
+  powgatory -c config.yaml --dry-run            Show what would be done
 
 '''
     )
@@ -105,12 +104,19 @@ Examples:
         action='store_true'
     )
 
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=250,
+        help='Number of parallel b2luigi workers (concurrently submitted/running jobs) to use.'
+    )
+
     return parser
 
 
 def run_workflow():
     """Main entry point for the CLI - parses arguments and runs the workflow."""
-    from .tasks import POWHEGWorkflow, POWHEGWorkflow_multiple_configs
+    from .tasks import POWHEGWorkflow, POWHEGMultiConfigWorkflow
 
     # Parse custom arguments while ignoring b2luigi batch-runner arguments.
     parser = create_parser()
@@ -120,10 +126,10 @@ def run_workflow():
     b2luigi_args = [sys.argv[0], *b2luigi_args]
 
     if args.version:
-        print(f"powheg-workflow version {__version__}")
+        print(f"powgatory version {__version__}")
         return 0
     else:
-        print(f"Start powheg-workflow ({__version__})")
+        print(f"Start powgatory ({__version__})")
 
     config_files = [Path(config_file).resolve() for config_file in args.config_file]
     if not config_files:
@@ -145,14 +151,14 @@ def run_workflow():
             print(f"Configuration: {primary_config['config_file']}")
 
     if args.dry_run:
-        print(f"\nDry run - would execute:")
+        print("\nDry run - would execute:")
         for config in configs:
             print(f"  Config:   {config['config_file']}")
-            print(f"  Cluster:  {config.get('cluster', 'mpi')}")
-            print(f"  Enabled stages:")
+            print("  Enabled stages:")
             for stage, settings in config.get('stages', {}).items():
                 if isinstance(settings, dict) and settings.get('enabled', False):
-                    print(f"    - {stage}")
+                    resources = settings['resources']
+                    print(f"    - {stage} (batch_system={resources['batch_system']}, submission_type={resources['submission_type']})")
                 elif settings is True:
                     print(f"    - {stage}")
             print()
@@ -161,22 +167,11 @@ def run_workflow():
     # Update sys.argv for b2luigi, removing our custom arguments
     sys.argv = b2luigi_args
 
-
-    # number of workers == number of parallel tasks to run.
-    # TODO: Make this a command line argument again with different default values depending on wether slurm or local is used.
-    def get_max_workers(config):
-        try:
-            return config["cluster_config"]["slurm"]["max_parallel_jobs"]
-        except KeyError:
-            return config["cluster_config"]["local"]["max_parallel_jobs"]
-
-    max_workers = max(get_max_workers(config) for config in configs)
-
     program_version = __version__.replace('.', '-')  # Replace . with hyphen for environment variable compatibility
     config_dict     = primary_config.to_dict()  # Convert to dictionary for serialization
 
     if multiple_configs:
-        workflow = POWHEGWorkflow_multiple_configs(
+        workflow = POWHEGMultiConfigWorkflow(
                         version             = program_version,
                         configuration_files = [str(config_file) for config_file in config_files],
                     )
@@ -185,6 +180,6 @@ def run_workflow():
         workflow = POWHEGWorkflow(version=program_version, config=config_dict)
 
     # Run tasks using b2luigi with ignore_additional_command_line_args=True
-    b2luigi.process(workflow, workers=max_workers, ignore_additional_command_line_args=True, dry_run=args.dry_run)
+    b2luigi.process(workflow, workers=args.workers, ignore_additional_command_line_args=True, dry_run=args.dry_run)
 
     return 0

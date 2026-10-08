@@ -1,0 +1,106 @@
+# POWHEG-BOX Run Configuration
+# Minimal configuration for a POWHEG run
+#
+# Usage: powgatory run.yaml
+# ============================================================================
+# POWHEG FILES (in current directory)
+# ============================================================================
+powheg_executable: "./pwhg_main"
+powheg_input_template: "powheg.input-save"
+powheg_seeds_template: "pwgseeds.dat-save"  # Optional
+
+# ============================================================================
+# JOB SUBMISSION SETTINGS
+# ============================================================================
+job_settings:
+  job_name: "powheg"
+  mail_type: "None"
+  mail_user: ""
+  run_dir: "powheg_output"          # Where powheg is run and output files are stored
+  log_dir: "powheg_output/logs"     # Where log files are stored
+  exclude_nodes: ""                 # Comma-separated list of nodes to exclude
+  # Container image - leave empty or omit to run without container
+  # Options:
+  #   - Registry URL: "oras://gitlab-registry.mpcdf.mpg.de/mpp/containers/jlinder/powheg:powheg-latest"
+  #   - Local path: "/path/to/powheg.sif" or "./powheg.sif"
+  #   - Empty/omit: run directly without container
+  container_image: "oras://gitlab-registry.mpcdf.mpg.de/mpp/containers/jlinder/powheg:powheg-latest"
+  # Script to be run before POWHEGWorkflow is started.
+  # For a POWHEGMultiConfigWorkflow this script is run once per config file.
+  # It is run in the workflow submission directory (cwd) and not the run_dir.
+  presubmit: ""
+
+# ============================================================================
+# STAGES TO RUN
+# ============================================================================
+stages:
+  stage1:
+    enabled: true
+    grid_iterations: 3                 # Grid optimization iterations
+    resources:
+      batch_system: slurm
+      submission_type: array
+      ntasks: 1
+      time: "24:00:00"
+      partition: alma
+    powheg_parameters:
+      ncall1: 500
+
+  stage2:
+    enabled: true
+    resources:
+      ntasks: 3
+      time: "24:00:00"
+      partition: alma
+
+  stage3:
+    enabled: true
+    grid_combination: false             # Use dedicated grid combination phase
+
+  stage3_gridcombine:
+    enabled: false
+    use_tmp: true                      # Use local /tmp for speed
+    resources:
+      ntasks: 3                          # Grid combination: 3 seeds only
+      time: "4:00:00"
+
+  stage4:
+    enabled: true
+
+  analysis:
+    enabled: false                     # Enable after stage 4 completes
+    lhef: true
+    pythia: true
+    weight_correction: true
+
+  addweights:
+    enabled: false                     # Enable to add reweighting to events
+    rwl_file: "newweights.xml"         # Reweighting XML file
+    lhe_dir: "."                       # Directory containing pwgevents-*.lhe files
+
+# ================================================================================
+# RESOURCE SETTINGS
+# Can be set globally or per stage. If set per stage, global settings are ignored.
+# ================================================================================
+# For local execution, only 'ntasks' is used (time/partition are ignored).
+# GNU parallel runs up to 4 jobs concurrently by default.
+resources:
+  batch_system: slurm                 # Batch system: local or slurm
+                                      # Use 'local' for testing with GNU parallel. (The partition is then ignored.)
+  submission_type: array              # Slurm submission type: single, array, or mpi
+  partition: alma
+  ntasks: 10                          # Number of seeds to run in parallel (array jobs) or number of MPI tasks (mpi jobs)
+  time: "24:00:00"
+  mem: 4000
+
+# ================================================================================
+# POWHEG PARAMETERS (override powheg.input-save defaults)
+# Can be set globally or per stage. If set per stage, global settings are ignored.
+# ================================================================================
+powheg_parameters:
+  # Uncomment to override:
+  # ncall1:  20000   # Grid optimization calls
+  # ncall2:  20000   # Cross section calls
+  # nubound: 10000   # Upper bound calls
+  # numevts:  1000   # Number of events
+
