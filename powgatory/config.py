@@ -106,7 +106,9 @@ class POWHEGConfig:
     @staticmethod
     def get_defaults():
         """Set default values for missing configuration keys."""
-        package_path = Path(__file__).parent.parent.resolve()
+        # config/ and scripts/ ship inside the package, so they are found the same way
+        # in a regular and in an editable install.
+        package_path = Path(__file__).parent.resolve()
         default_config_file = package_path / "config/config_default.yaml"
         with open(default_config_file, 'r') as f:
             config_dict = yaml.safe_load(f)
@@ -342,7 +344,7 @@ class POWHEGConfig:
             raise FileNotFoundError(f"ERROR: POWHEG input template not found: {self['powheg_input_template']}")
 
         # Check for seeds file template.
-        # It None is given, the one taken within the powheg_workflow package will be used.
+        # It None is given, the one taken within the powgatory package will be used.
         # This error is only raised if a user explicitly sets a seeds template that does not exist.
         if not self['powheg_seeds_template'].exists():
             raise FileNotFoundError(f"ERROR: pwgseeds.dat-save not found: {self['powheg_seeds_template']}")

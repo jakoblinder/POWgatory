@@ -412,13 +412,11 @@ class POWHEGStage(POWHEGBaseTask):
         b2luigi setting, i.e. overwrite of b2luigi.set_setting("executable", <value>) for this task.
 
         Returns:
-            Python script to execute for this task, formatted as a list for easy concatenation with other commands.
-            Path to the main entry point of this program.
+            Arguments that make the python executable run this package's entry point (powgatory/__main__.py),
+            formatted as a list for easy concatenation with other commands.
             This replaces the relative setting of the python script which 'add_filename_to_cmd == True' would use.
         """
-        this_file_path = Path(__file__).resolve()
-        main_file      = this_file_path.parent.parent / "run_workflow.py"
-        return [str(main_file),]
+        return ["-m", "powgatory"]
 
     @property
     def add_filename_to_cmd(self) -> str:

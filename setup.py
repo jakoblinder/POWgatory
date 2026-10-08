@@ -15,17 +15,22 @@ setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     author='POWHEG Team',
-    url='https://github.com/your-repo/powheg-workflow',
+    url='https://github.com/jakoblinder/POWgatory',
     packages=find_packages(),
     include_package_data=True,
+    # Files read at runtime; they must be part of the installed package, not just the checkout.
     package_data={
-        'powheg_workflow': [
-            '../config/clusters/*.yaml',
-            '../config/scripts/*.sh',
+        'powgatory': [
+            'config/*.yaml',
+            'config/*.sh',
+            'config/pwgseeds.dat-save',
+            'scripts/*.sh',
         ],
     },
     install_requires=[
-        'b2luigi>=0.9.0',   # BELLE2 Luigi variant
+        # BELLE2 Luigi variant. The fork adds Slurm array/mpi submission ("submission_type"),
+        # which is not part of any b2luigi release yet.
+        'b2luigi @ git+https://github.com/jakoblinder/b2luigi.git@slurm_array_submission',
         'luigi>=3.0.0',     # Workflow orchestration
         'pyyaml>=5.4',      # YAML configuration
     ],
@@ -42,14 +47,14 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'powgatory=powheg_workflow.cli:run_workflow',
+            'powgatory=powgatory.cli:run_workflow',
         ],
     },
     python_requires='>=3.11',   # Matches the b2luigi fork providing array/mpi submission
     classifiers=[
         'Development Status :: 4 - Beta',
         'Intended Audience :: Science/Research',
-        'License :: OSI Approved :: Apache Software License',
+        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',

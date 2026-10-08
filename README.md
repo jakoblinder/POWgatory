@@ -32,37 +32,52 @@ A POWHEG-BOX calculation runs in several sequential stages (grid generation, int
 ## Requirements
 
 - Python 3.11+ (required by the `b2luigi` version below).
-- [`b2luigi`](https://b2luigi.readthedocs.io/) with Slurm array/MPI submission support (see below) and `luigi`.
+- [`b2luigi`](https://b2luigi.readthedocs.io/) with Slurm array/MPI submission support (see below) and `luigi`, both installed automatically.
+- `git` on the installing machine, since the `b2luigi` fork is installed directly from GitHub.
 - A Slurm cluster for anything beyond local testing (`sinfo`, `sbatch`, `squeue`, `scancel` must be on `PATH`).
 - [Apptainer](https://apptainer.org/) if you want containerized execution (optional).
 - A working POWHEG-BOX build (`pwhg_main` or equivalent) and its input/seed templates.
 
-**Important:** `submission_type: array` (the default) and `submission_type: mpi` (see [Batch submission details](#batch-submission-details)) require a version of `b2luigi` that implements the `submission_type` setting for Slurm. This support is not yet part of any released `b2luigi` version; it lives on the `slurm_array_submission` branch of [jakoblinder/b2luigi](https://github.com/jakoblinder/b2luigi/tree/slurm_array_submission). With the PyPI package pinned in `setup.py`, `submission_type` is silently ignored and grouped branches are not submitted as arrays. Install the fork into the same environment, e.g.:
-
-```bash
-pip install -e /path/to/b2luigi   # checkout of the slurm_array_submission branch
-```
+**About `b2luigi`:** `submission_type: array` (the default) and `submission_type: mpi` (see [Batch submission details](#batch-submission-details)) need the `submission_type` setting for Slurm. No released `b2luigi` version has it yet. It lives on the `slurm_array_submission` branch of [jakoblinder/b2luigi](https://github.com/jakoblinder/b2luigi/tree/slurm_array_submission), and `setup.py` installs `b2luigi` from that branch. With a PyPI `b2luigi`, `submission_type` would be silently ignored and grouped branches would not be submitted as arrays.
 
 ## Installation
 
-```bash
-git clone <repo-url> POWgatory
-cd POWgatory
+Install into a virtual environment on a filesystem that the batch nodes can see. Batch jobs run with the same Python interpreter as the `powgatory` command that submitted them.
 
-# Editable install is recommended so changes to powheg_workflow/ take effect immediately
-pip install --user -e .
+```bash
+python3 -m venv /path/to/venv
+source /path/to/venv/bin/activate
+
+pip install git+https://github.com/jakoblinder/POWgatory.git
+# or, from a clone:  pip install /path/to/POWgatory
 
 # Verify
 powgatory --version
 ```
 
-This installs the `powgatory` console script (`powheg_workflow.cli:run_workflow`) and the `powheg_workflow` Python package.
+This installs:
+- the `powgatory` command;
+- the `powgatory` Python package, including its default configuration (`powgatory/config/`) and job script (`powgatory/scripts/`);
+- `b2luigi` from the fork's `slurm_array_submission` branch.
 
-If `powgatory` isn't found afterwards, make sure your user site-packages `bin` directory is on `PATH`:
+### Updating `b2luigi`
+
+`setup.py` points at the fork's `slurm_array_submission` branch on GitHub. pip does not re-fetch a branch by itself, so after new commits are pushed to the fork, update with:
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
+pip install --force-reinstall --no-deps "b2luigi @ git+https://github.com/jakoblinder/b2luigi.git@slurm_array_submission"
 ```
+
+### Development setup
+
+To work on POWgatory and the `b2luigi` fork side by side, install both from local checkouts in editable mode. Install POWgatory with `--no-deps` so that pip does not replace the editable `b2luigi` with a copy from GitHub:
+
+```bash
+pip install -e /path/to/b2luigi    # local checkout of the slurm_array_submission branch
+pip install -e /path/to/POWgatory --no-deps
+```
+
+Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run the second command after changing `setup.py`, e.g. after adding a dependency or an entry point.
 
 ## Quick start
 
@@ -73,8 +88,8 @@ cp /path/to/powheg-box/pwhg_main .
 cp /path/to/powheg-box/powheg.input-save .
 cp /path/to/powheg-box/pwgseeds.dat-save .   # optional: falls back to a bundled default
 
-# Start from the packaged default configuration and edit it
-cp <repo>/config/example.yaml run.yaml
+# Start from the packaged example configuration and edit it
+cp "$(python -c 'import powgatory, pathlib; print(pathlib.Path(powgatory.__file__).parent / "config" / "example.yaml")')" run.yaml
 $EDITOR run.yaml
 
 # Submit the workflow
@@ -85,7 +100,7 @@ powgatory -c run.yaml
 
 ## Pipeline architecture
 
-Each stage is executed by a fixed sequence of internal b2luigi tasks (`powheg_workflow/tasks.py`):
+Each stage is executed by a fixed sequence of internal b2luigi tasks (`powgatory/tasks.py`):
 
 1. **`POWHEGPresubmit`** — runs `job_settings.presubmit` once, locally, before anything else (skipped if empty).
 2. **`POWHEGStageSetup`** — writes that stage's `powheg.input` by copying `powheg_input_template` and patching in the stage's `powheg_parameters` (values are rewritten in place; unrecognized parameters are appended with a comment).
@@ -114,7 +129,7 @@ A failed POWHEG run inside `POWHEGStage` (non-zero exit code) raises a `RuntimeE
 
 ## Configuration reference
 
-`run.yaml` is merged against `config/config_default.yaml`, which ships only the minimal set of keys needed to run and is reproduced below as the schema reference. `config/example.yaml` is a fuller, commented example built on top of the same schema — including per-stage `resources`/`powheg_parameters` overrides — and is the recommended starting point for a real run (see [Quick start](#quick-start)).
+`run.yaml` is merged against `powgatory/config/config_default.yaml`, which ships only the minimal set of keys needed to run and is reproduced below as the schema reference. `powgatory/config/example.yaml` is a fuller, commented example built on top of the same schema — including per-stage `resources`/`powheg_parameters` overrides — and is the recommended starting point for a real run (see [Quick start](#quick-start)).
 
 ```yaml
 powheg_executable: "./pwhg_main"
@@ -159,7 +174,7 @@ powheg_parameters:                  # applies to every stage unless overridden p
 
 ### Global vs. per-stage settings
 
-Both `resources` and `powheg_parameters` can be set once at the top level, applying to every stage, **and/or** overridden for an individual stage under `stages.<stage>.resources` / `stages.<stage>.powheg_parameters`. Overrides are merged **key by key**, not block-by-block: a stage that only sets one key still inherits every other key from the top-level block. `config/example.yaml` demonstrates this — a larger global `ntasks` for most stages, with `stage1` cut down to a single grid-generation task and its own `ncall1`:
+Both `resources` and `powheg_parameters` can be set once at the top level, applying to every stage, **and/or** overridden for an individual stage under `stages.<stage>.resources` / `stages.<stage>.powheg_parameters`. Overrides are merged **key by key**, not block-by-block: a stage that only sets one key still inherits every other key from the top-level block. `powgatory/config/example.yaml` demonstrates this — a larger global `ntasks` for most stages, with `stage1` cut down to a single grid-generation task and its own `ncall1`:
 
 ```yaml
 resources:
@@ -236,7 +251,7 @@ Any additional arguments are passed through to b2luigi/luigi.
 
 Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 
-- `bootstrap.sh` — generated per-run from `config/bootstrap.sh`; sourced at the start of every batch job. Prints diagnostic job info and sources an optional `<run_dir>/.env` for user environment setup (module loads, library paths, etc.).
+- `bootstrap.sh` — generated per-run from `powgatory/config/bootstrap.sh`; sourced at the start of every batch job. Prints diagnostic job info and sources an optional `<run_dir>/.env` for user environment setup (module loads, library paths, etc.).
 - `task_files/` — b2luigi's generated submission scripts.
 - `logs/<job_code>/` — POWHEG stdout/stderr per branch, bracketed with `<Started-POWHEG:...>`/`<Finished-POWHEG:...>` markers that `POWHEGStageTimings` parses.
 - `timings.yaml` — per-stage timing statistics (shortest/longest/average/total), updated as each stage completes.
@@ -256,9 +271,8 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 
 This reflects the current state of the code, so gaps are documented rather than hidden:
 
-- `stage3.grid_combination`, the `stage3_gridcombine` stage, and the `analysis`/`addweights` stages are all present in the configuration schema but have **no corresponding task implementation** — enabling them has no effect. `powheg_workflow/scrap.py` contains an old, unused draft of this work and is not imported anywhere.
-- `setup.py` has a few stale details left over from earlier iterations of the project: its `classifiers` claim an Apache license while the repository ships GPLv3 (see below); and its `package_data` references `config/clusters/` and `config/scripts/`, neither of which exist in the current layout.
-- `submission_type: array` and `mpi` depend on unreleased `b2luigi` functionality (see [Requirements](#requirements)).
+- `stage3.grid_combination`, the `stage3_gridcombine` stage, and the `analysis`/`addweights` stages are all present in the configuration schema but have **no corresponding task implementation** — enabling them has no effect. `powgatory/scrap.py` contains an old, unused draft of this work and is not imported anywhere.
+- `submission_type: array` and `mpi` depend on unreleased `b2luigi` functionality, installed from a fork (see [Requirements](#requirements)).
 - For `submission_type: mpi`, the live `sinfo` data in `POWHEGStage.partition_info` is not yet passed on to b2luigi; b2luigi packs sub-tasks onto nodes using its own `tasks_per_node` setting (default 64), which must match the partition.
 
 ## License
