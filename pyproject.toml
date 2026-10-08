@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "powgatory"
+dynamic = ["version"]   # Read from powgatory.__version__
+description = "POWHEG-BOX workflow orchestration using b2luigi"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Jakob Linder"},
+]
+keywords = ["powheg", "physics", "workflow", "luigi", "b2luigi", "slurm", "hpc"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+requires-python = ">=3.11"   # Matches the b2luigi fork providing array/mpi submission
+dependencies = [
+    # BELLE2 Luigi variant. The fork adds Slurm array/mpi submission ("submission_type"),
+    # which is not part of any b2luigi release yet.
+    "b2luigi @ git+https://github.com/jakoblinder/b2luigi.git@slurm_array_submission",
+    "luigi>=3.0.0",     # Workflow orchestration
+    "pyyaml>=5.4",      # YAML configuration
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov",
+    "black",
+    "flake8",
+]
+
+[project.urls]
+Homepage = "https://github.com/jakoblinder/POWgatory"
+
+[project.scripts]
+powgatory = "powgatory.cli:run_workflow"
+
+[tool.setuptools.dynamic]
+version = {attr = "powgatory.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["powgatory*"]
+
+# Files read at runtime; they must be part of the installed package, not just the checkout.
+[tool.setuptools.package-data]
+powgatory = [
+    "config/*.yaml",
+    "config/*.sh",
+    "config/pwgseeds.dat-save",
+    "scripts/*.sh",
+]

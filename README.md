@@ -38,7 +38,7 @@ A POWHEG-BOX calculation runs in several sequential stages (grid generation, int
 - [Apptainer](https://apptainer.org/) if you want containerized execution (optional).
 - A working POWHEG-BOX build (`pwhg_main` or equivalent) and its input/seed templates.
 
-**About `b2luigi`:** `submission_type: array` (the default) and `submission_type: mpi` (see [Batch submission details](#batch-submission-details)) need the `submission_type` setting for Slurm. No released `b2luigi` version has it yet. It lives on the `slurm_array_submission` branch of [jakoblinder/b2luigi](https://github.com/jakoblinder/b2luigi/tree/slurm_array_submission), and `setup.py` installs `b2luigi` from that branch. With a PyPI `b2luigi`, `submission_type` would be silently ignored and grouped branches would not be submitted as arrays.
+**About `b2luigi`:** `submission_type: array` (the default) and `submission_type: mpi` (see [Batch submission details](#batch-submission-details)) need the `submission_type` setting for Slurm. No released `b2luigi` version has it yet. It lives on the `slurm_array_submission` branch of [jakoblinder/b2luigi](https://github.com/jakoblinder/b2luigi/tree/slurm_array_submission), and `pyproject.toml` installs `b2luigi` from that branch. With a PyPI `b2luigi`, `submission_type` would be silently ignored and grouped branches would not be submitted as arrays.
 
 ## Installation
 
@@ -62,7 +62,7 @@ This installs:
 
 ### Updating `b2luigi`
 
-`setup.py` points at the fork's `slurm_array_submission` branch on GitHub. pip does not re-fetch a branch by itself, so after new commits are pushed to the fork, update with:
+`pyproject.toml` points at the fork's `slurm_array_submission` branch on GitHub. pip does not re-fetch a branch by itself, so after new commits are pushed to the fork, update with:
 
 ```bash
 pip install --force-reinstall --no-deps "b2luigi @ git+https://github.com/jakoblinder/b2luigi.git@slurm_array_submission"
@@ -77,7 +77,7 @@ pip install -e /path/to/b2luigi    # local checkout of the slurm_array_submissio
 pip install -e /path/to/POWgatory --no-deps
 ```
 
-Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run the second command after changing `setup.py`, e.g. after adding a dependency or an entry point.
+Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run the second command after changing `pyproject.toml`, e.g. after adding a dependency or an entry point.
 
 ## Quick start
 
