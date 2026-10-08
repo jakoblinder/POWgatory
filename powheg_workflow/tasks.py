@@ -639,7 +639,7 @@ class POWHEGStage(POWHEGBaseTask):
 
         # Stage 4's event file is the known culprit: POWHEG refuses to run if it
         # already exists, even if the run was previously incomplete.
-        move_incomplete_event_files = False # FIXME: Make this configurable in the config file.
+        move_incomplete_event_files = True # FIXME: Make this configurable in the config file.
         if self.stage_number == 4 and move_incomplete_event_files:
             candidate_paths.add(run_dir / f"pwgevents-{self.branch_id:04d}.lhe")
 
