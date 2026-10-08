@@ -65,8 +65,10 @@ This installs:
 `pyproject.toml` points at the fork's `slurm_array_submission` branch on GitHub. pip does not re-fetch a branch by itself, so after new commits are pushed to the fork, update with:
 
 ```bash
-pip install --force-reinstall --no-deps "b2luigi @ git+https://github.com/jakoblinder/b2luigi.git@slurm_array_submission"
+pip install --force-reinstall "b2luigi @ git+https://github.com/jakoblinder/b2luigi.git@slurm_array_submission"
 ```
+
+Do not add `--no-deps` here: new commits of the fork can bring new dependencies (e.g. `xrootd`, which upstream `b2luigi` now requires), and `import b2luigi` fails without them.
 
 ### Development setup
 
@@ -77,7 +79,7 @@ pip install -e /path/to/b2luigi    # local checkout of the slurm_array_submissio
 pip install -e /path/to/POWgatory --no-deps
 ```
 
-Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run the second command after changing `pyproject.toml`, e.g. after adding a dependency or an entry point.
+Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run the matching command when a project's `pyproject.toml` changes, e.g. after adding a dependency or an entry point. For `b2luigi` this also happens when upstream changes are merged into the fork.
 
 ## Quick start
 
