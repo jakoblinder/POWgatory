@@ -19,6 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Physics",
 ]
 requires-python = ">=3.11"   # Matches the b2luigi fork providing array/mpi submission
@@ -26,7 +27,9 @@ dependencies = [
     # BELLE2 Luigi variant. The fork adds Slurm array/mpi submission ("submission_type"),
     # which is not part of any b2luigi release yet.
     "b2luigi @ git+https://github.com/jakoblinder/b2luigi.git@slurm_array_submission",
-    "luigi>=3.0.0",     # Workflow orchestration
+    # Workflow orchestration. Pinned to a commit after v3.8.1 because no luigi release supports
+    # Python 3.14 yet (support was added in spotify/luigi#3433). Go back to a release once one does.
+    "luigi @ git+https://github.com/spotify/luigi.git@f5feb7a4655ad73ef56f0ab04d7903ab43b63e12",
     "pyyaml>=5.4",      # YAML configuration
 ]
 

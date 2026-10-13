@@ -31,9 +31,9 @@ A POWHEG-BOX calculation runs in several sequential stages (grid generation, int
 
 ## Requirements
 
-- Python 3.11+ (required by the `b2luigi` version below).
+- Python 3.11 to 3.14 (3.11+ is required by the `b2luigi` version below).
 - [`b2luigi`](https://b2luigi.readthedocs.io/) with Slurm array/MPI submission support (see below) and `luigi`, both installed automatically.
-- `git` on the installing machine, since the `b2luigi` fork is installed directly from GitHub.
+- `git` on the installing machine, since `b2luigi` and `luigi` are installed directly from GitHub.
 - A Slurm cluster for anything beyond local testing (`sinfo`, `sbatch`, `squeue`, `scancel` must be on `PATH`).
 - [Apptainer](https://apptainer.org/) if you want containerized execution (optional).
 - A working POWHEG-BOX build (`pwhg_main` or equivalent) and its input/seed templates.
@@ -45,7 +45,7 @@ A POWHEG-BOX calculation runs in several sequential stages (grid generation, int
 Install into a virtual environment on a filesystem that the batch nodes can see. Batch jobs run with the same Python interpreter as the `powgatory` command that submitted them.
 
 ```bash
-python3 -m venv /path/to/venv
+python3.14 -m venv /path/to/venv    # any Python 3.11-3.14; the system python3 may be older
 source /path/to/venv/bin/activate
 
 pip install git+https://github.com/jakoblinder/POWgatory.git
@@ -58,17 +58,19 @@ powgatory --version
 This installs:
 - the `powgatory` command;
 - the `powgatory` Python package, including its default configuration (`powgatory/config/`) and job script (`powgatory/scripts/`);
-- `b2luigi` from the fork's `slurm_array_submission` branch.
+- `b2luigi` from the fork's `slurm_array_submission` branch;
+- `luigi` from a pinned commit on GitHub, because no `luigi` release supports Python 3.14 yet.
 
 ### Updating `b2luigi`
 
-`pyproject.toml` points at the fork's `slurm_array_submission` branch on GitHub. pip does not re-fetch a branch by itself, so after new commits are pushed to the fork, update with:
+`pyproject.toml` points at the fork's `slurm_array_submission` branch on GitHub. pip does not re-fetch a branch by itself, so after new commits are pushed to the fork, reinstall POWgatory together with all its dependencies:
 
 ```bash
-pip install --force-reinstall "b2luigi @ git+https://github.com/jakoblinder/b2luigi.git@slurm_array_submission"
+pip install --force-reinstall git+https://github.com/jakoblinder/POWgatory.git
+# or, from a clone:  pip install --force-reinstall /path/to/POWgatory
 ```
 
-Do not add `--no-deps` here: new commits of the fork can bring new dependencies (e.g. `xrootd`, which upstream `b2luigi` now requires), and `import b2luigi` fails without them.
+Reinstall POWgatory, not `b2luigi` alone. pip only applies POWgatory's pinned `luigi` when POWgatory is part of the command. On its own, `b2luigi` gets `luigi` from PyPI, which on Python 3.14 is the old 3.6.0 that fails on import. Do not add `--no-deps` either: new commits of the fork can bring new dependencies (e.g. `xrootd`, which upstream `b2luigi` now requires), and `import b2luigi` fails without them.
 
 ### Development setup
 
@@ -79,7 +81,7 @@ pip install -e /path/to/POWgatory
 pip install -e /path/to/b2luigi    # local checkout of the slurm_array_submission branch
 ```
 
-Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run both commands, in this order, when a project's `pyproject.toml` changes, e.g. after adding a dependency or an entry point. For `b2luigi` this also happens when upstream changes are merged into the fork. The order matters because reinstalling POWgatory puts the GitHub copy of `b2luigi` back.
+Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run both commands, in this order, when a project's `pyproject.toml` changes, e.g. after adding a dependency or an entry point. For `b2luigi` this also happens when upstream changes are merged into the fork. The order matters because reinstalling POWgatory puts the GitHub copy of `b2luigi` back. Install `b2luigi` with a plain `pip install -e`, without `--force-reinstall` or `--upgrade`, so that it keeps POWgatory's pinned `luigi`.
 
 ## Quick start
 
@@ -263,6 +265,7 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 ## Troubleshooting
 
 - **`powgatory: command not found`** — check `pip show powgatory` and that your Python user-bin directory is on `PATH`.
+- **`ModuleNotFoundError: No module named 'pkg_resources'`** — `luigi` 3.6.0 got installed, usually because `b2luigi` was installed or updated on its own on Python 3.14. Reinstall POWgatory as described in [Updating `b2luigi`](#updating-b2luigi).
 - **A stage silently doesn't run** — check the validation warnings printed at startup; they catch the common cases (e.g. a later stage enabled while its prerequisite is disabled).
 - **`Unknown submission type: mpi`** — your installed `b2luigi` doesn't yet support MPI-style submission; see [Requirements](#requirements).
 - **Container pull fails** — `setup_container()` shells out to `apptainer pull`; check that `apptainer` is on `PATH` on the submission host and that the registry URL is reachable.
