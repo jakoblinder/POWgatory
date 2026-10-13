@@ -72,14 +72,14 @@ Do not add `--no-deps` here: new commits of the fork can bring new dependencies 
 
 ### Development setup
 
-To work on POWgatory and the `b2luigi` fork side by side, install both from local checkouts in editable mode. Install POWgatory with `--no-deps` so that pip does not replace the editable `b2luigi` with a copy from GitHub:
+To work on POWgatory and the `b2luigi` fork side by side, install both from local checkouts in editable mode. Install POWgatory first, with its dependencies. This also installs `b2luigi` from GitHub, which the second command then replaces with your local checkout:
 
 ```bash
+pip install -e /path/to/POWgatory
 pip install -e /path/to/b2luigi    # local checkout of the slurm_array_submission branch
-pip install -e /path/to/POWgatory --no-deps
 ```
 
-Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run the matching command when a project's `pyproject.toml` changes, e.g. after adding a dependency or an entry point. For `b2luigi` this also happens when upstream changes are merged into the fork.
+Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run both commands, in this order, when a project's `pyproject.toml` changes, e.g. after adding a dependency or an entry point. For `b2luigi` this also happens when upstream changes are merged into the fork. The order matters because reinstalling POWgatory puts the GitHub copy of `b2luigi` back.
 
 ## Quick start
 
