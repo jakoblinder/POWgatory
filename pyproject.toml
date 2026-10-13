@@ -24,9 +24,10 @@ classifiers = [
 ]
 requires-python = ">=3.11"   # Matches the b2luigi fork providing array/mpi submission
 dependencies = [
-    # BELLE2 Luigi variant. The fork adds Slurm array/mpi submission ("submission_type"),
-    # which is not part of any b2luigi release yet.
-    "b2luigi @ git+https://github.com/jakoblinder/b2luigi.git@slurm_array_submission",
+    # BELLE2 Luigi variant. The fork's "powgatory" branch combines two changes that are not part
+    # of any b2luigi release yet: Slurm array/mpi submission ("submission_type", belle2/b2luigi#6)
+    # and allowing tenacity 9, which the luigi pin below needs.
+    "b2luigi @ git+https://github.com/jakoblinder/b2luigi.git@powgatory",
     # Workflow orchestration. Pinned to a commit after v3.8.1 because no luigi release supports
     # Python 3.14 yet (support was added in spotify/luigi#3433). Go back to a release once one does.
     "luigi @ git+https://github.com/spotify/luigi.git@f5feb7a4655ad73ef56f0ab04d7903ab43b63e12",

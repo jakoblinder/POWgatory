@@ -38,7 +38,7 @@ A POWHEG-BOX calculation runs in several sequential stages (grid generation, int
 - [Apptainer](https://apptainer.org/) if you want containerized execution (optional).
 - A working POWHEG-BOX build (`pwhg_main` or equivalent) and its input/seed templates.
 
-**About `b2luigi`:** `submission_type: array` (the default) and `submission_type: mpi` (see [Batch submission details](#batch-submission-details)) need the `submission_type` setting for Slurm. No released `b2luigi` version has it yet. It lives on the `slurm_array_submission` branch of [jakoblinder/b2luigi](https://github.com/jakoblinder/b2luigi/tree/slurm_array_submission), and `pyproject.toml` installs `b2luigi` from that branch. With a PyPI `b2luigi`, `submission_type` would be silently ignored and grouped branches would not be submitted as arrays.
+**About `b2luigi`:** `submission_type: array` (the default) and `submission_type: mpi` (see [Batch submission details](#batch-submission-details)) need the `submission_type` setting for Slurm. No released `b2luigi` version has it yet; it is proposed upstream in [belle2/b2luigi#6](https://github.com/belle2/b2luigi/pull/6). `pyproject.toml` installs `b2luigi` from the `powgatory` branch of [jakoblinder/b2luigi](https://github.com/jakoblinder/b2luigi/tree/powgatory), which combines that pull request with a second unreleased change: allowing `tenacity` 9, which the pinned `luigi` needs. With a PyPI `b2luigi`, `submission_type` would be silently ignored and grouped branches would not be submitted as arrays.
 
 ## Installation
 
@@ -58,12 +58,12 @@ powgatory --version
 This installs:
 - the `powgatory` command;
 - the `powgatory` Python package, including its default configuration (`powgatory/config/`) and job script (`powgatory/scripts/`);
-- `b2luigi` from the fork's `slurm_array_submission` branch;
+- `b2luigi` from the fork's `powgatory` branch;
 - `luigi` from a pinned commit on GitHub, because no `luigi` release supports Python 3.14 yet.
 
 ### Updating `b2luigi`
 
-`pyproject.toml` points at the fork's `slurm_array_submission` branch on GitHub. pip does not re-fetch a branch by itself, so after new commits are pushed to the fork, reinstall POWgatory together with all its dependencies:
+`pyproject.toml` points at the fork's `powgatory` branch on GitHub. pip does not re-fetch a branch by itself, so after new commits are pushed to the fork, reinstall POWgatory together with all its dependencies:
 
 ```bash
 pip install --force-reinstall git+https://github.com/jakoblinder/POWgatory.git
@@ -78,7 +78,15 @@ To work on POWgatory and the `b2luigi` fork side by side, install both from loca
 
 ```bash
 pip install -e /path/to/POWgatory
-pip install -e /path/to/b2luigi    # local checkout of the slurm_array_submission branch
+pip install -e /path/to/b2luigi    # local checkout of the powgatory branch
+```
+
+The `powgatory` branch is `slurm_array_submission` (the pull request) plus the commit of `allow_tenacity_9`. After changing `slurm_array_submission`, rebuild and push it with:
+
+```bash
+git switch -C powgatory slurm_array_submission
+git cherry-pick allow_tenacity_9
+git push --force-with-lease origin powgatory
 ```
 
 Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run both commands, in this order, when a project's `pyproject.toml` changes, e.g. after adding a dependency or an entry point. For `b2luigi` this also happens when upstream changes are merged into the fork. The order matters because reinstalling POWgatory puts the GitHub copy of `b2luigi` back. Install `b2luigi` with a plain `pip install -e`, without `--force-reinstall` or `--upgrade`, so that it keeps POWgatory's pinned `luigi`.
