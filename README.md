@@ -74,22 +74,14 @@ Reinstall POWgatory, not `b2luigi` alone. pip only applies POWgatory's pinned `l
 
 ### Development setup
 
-To work on POWgatory and the `b2luigi` fork side by side, install both from local checkouts in editable mode. Install POWgatory first, with its dependencies. This also installs `b2luigi` from GitHub, which the second command then replaces with your local checkout:
+To develop POWgatory, install it and the `b2luigi` fork from local checkouts in editable mode, POWgatory first:
 
 ```bash
 pip install -e /path/to/POWgatory
-pip install -e /path/to/b2luigi    # local checkout of the powgatory branch
+pip install -e /path/to/b2luigi    # checkout of the powgatory branch
 ```
 
-The `powgatory` branch is `slurm_array_submission` (the pull request) plus the commit of `allow_tenacity_9`. After changing `slurm_array_submission`, rebuild and push it with:
-
-```bash
-git switch -C powgatory slurm_array_submission
-git cherry-pick allow_tenacity_9
-git push --force-with-lease origin powgatory
-```
-
-Changes to either checkout take effect immediately, without pushing or reinstalling. Re-run both commands, in this order, when a project's `pyproject.toml` changes, e.g. after adding a dependency or an entry point. For `b2luigi` this also happens when upstream changes are merged into the fork. The order matters because reinstalling POWgatory puts the GitHub copy of `b2luigi` back. Install `b2luigi` with a plain `pip install -e`, without `--force-reinstall` or `--upgrade`, so that it keeps POWgatory's pinned `luigi`.
+Use the fork's `powgatory` branch for this. It combines the Slurm array/MPI submission support from the `slurm_array_submission` branch with the change from the `allow_tenacity_9` branch, which allows `tenacity` 9, as required by the pinned `luigi`.
 
 ## Quick start
 
