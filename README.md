@@ -4,6 +4,9 @@ POWgatory is a [b2luigi](https://b2luigi.readthedocs.io/)-based workflow manager
 
 This document is the single reference for installing, configuring, and running POWgatory, and for understanding what is and isn't currently implemented.
 
+> [!TIP]
+> Using Claude Code, e.g. in VS Code? Install the POWgatory skill once, and Claude knows how to set up and run POWgatory: see [Using POWgatory with Claude Code](#using-powgatory-with-claude-code).
+
 ## Contents
 
 - [Overview](#overview)
@@ -365,7 +368,15 @@ A personal template holds the settings that stay the same from run to run, such 
 
 ## Using POWgatory with Claude Code
 
-This repository is also a Claude Code plugin marketplace. Its plugin `powgatory` brings a skill that tells Claude how to set up, start, monitor and debug POWgatory runs, so you can ask Claude in any run directory, e.g. "start a POWHEG run with 200 seeds from this powheg.input-save". Install it once:
+This repository is also a Claude Code plugin marketplace. Its plugin `powgatory` brings a skill that tells Claude how to set up, start, monitor and debug POWgatory runs, so you can ask Claude in any run directory, e.g. "start a POWHEG run with 200 seeds from this powheg.input-save". Install it once.
+
+> [!TIP]
+> **Installation in the VS Code extension** ([docs](https://code.claude.com/docs/en/vs-code#manage-plugins)):
+> 1. Type `/plugins` in the Claude Code prompt box. This opens the plugin manager.
+> 2. In its **Marketplaces** tab, add the marketplace `jakoblinder/POWgatory`.
+> 3. In its **Plugins** tab, install `powgatory` for yourself (user scope), so that it is available in all your projects.
+
+In Claude Code in the terminal:
 
 ```
 /plugin install powgatory --marketplace jakoblinder/POWgatory
