@@ -187,6 +187,7 @@ Each merge (`POWHEGMerge`) is one job with its stage's `resources`, a Slurm job 
 | 3 `sum` | Sum (e.g. born + virtual + real) |
 | 4 `max`, 5 `min` | Maximum or minimum, with its error |
 | 6 `sum-last` | Sum of all but the last set, minus the last set |
+| -1 | No merge for this stage |
 
 The merge is `powgatory/merge.py`, the logic of `mergedata` (POWHEG's Fortran program and its C++ rewrite) with numpy: it reads one file at a time, so memory grows with the lines of one file, not with the number of files, and it writes the same output as `mergedata`, numbers in Fortran D notation (`0.12345678D+00`). It can also be used by hand:
 

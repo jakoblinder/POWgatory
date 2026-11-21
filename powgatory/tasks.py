@@ -23,7 +23,7 @@ import yaml
 
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapperTask
-from .config import POWHEGConfig, ANALYSIS_STAGES
+from .config import POWHEGConfig, ANALYSIS_STAGES, NO_MERGE
 from .merge import METHOD_NAMES, merge_histograms
 from .ub_correction import correction_factors
 
@@ -1323,10 +1323,15 @@ class POWHEGWorkflow(POWHEGWrapperTask):
             yield POWHEGStageTimings(stage=self.get_stage_str(highest_stage), version=self.version, config=self.config)
 
         # The merges of the histogram files; the one of stage 2 runs while stage 3 runs, since
-        # stage 3 requires stage 2's timings task, not the merge.
-        merged_stages = [stage for stage in ("stage2",) + ANALYSIS_STAGES if stages_config[stage]['enabled']]
-        for stage in merged_stages:
-            yield POWHEGMerge(stage=stage, grid_iteration=-1, branch_id=1, version=self.version, config=self.config)
+        # stage 3 requires stage 2's timings task, not the merge. Without a merge, an analysis
+        # stage is required through its timings task (stage 2 already is, through stage 3 or 4).
+        for stage in ("stage2",) + ANALYSIS_STAGES:
+            enabled = stages_config[stage]['enabled']
+            merged  = stages_config[stage]['merge_method'] != NO_MERGE
+            if enabled and merged:
+                yield POWHEGMerge(stage=stage, grid_iteration=-1, branch_id=1, version=self.version, config=self.config)
+            elif enabled and stage in ANALYSIS_STAGES:
+                yield POWHEGStageTimings(stage=stage, version=self.version, config=self.config)
 
 
 class POWHEGMultiConfigWorkflow(POWHEGWrapperTask):

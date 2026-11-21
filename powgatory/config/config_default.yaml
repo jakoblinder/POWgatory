@@ -58,7 +58,8 @@ stages:
     enabled: true
     # The NLO histograms pwg-<seed>-NLO.top of all seeds (written only with testplots 1) are
     # merged into pwg-mean-NLO.top, as a job with this stage's resources. Methods: 1 mean of sets
-    # with equal statistics, 2 weighted with 1/error^2, 3 sum, 4 max, 5 min, 6 sum minus the last.
+    # with equal statistics, 2 weighted with 1/error^2, 3 sum, 4 max, 5 min, 6 sum minus the last;
+    # -1 no merge.
     merge_method: 1
 
   stage3:
