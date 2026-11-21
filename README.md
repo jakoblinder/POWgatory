@@ -133,7 +133,7 @@ A failed POWHEG run inside `POWHEGStage` (non-zero exit code) raises a `RuntimeE
 
 ## Configuration reference
 
-`run.yaml` is merged against `powgatory/config/config_default.yaml`, which ships only the minimal set of keys needed to run and is reproduced below as the schema reference. `powgatory/config/example.yaml` is a fuller, commented example built on top of the same schema — including per-stage `resources`/`powheg_parameters` overrides — and is the recommended starting point for a real run (see [Quick start](#quick-start)).
+`run.yaml` is merged against `powgatory/config/config_default.yaml`, which ships only the minimal set of keys needed to run and is reproduced below as the schema reference. `powgatory/config/example.yaml` holds only the settings most runs change, including a per-stage `resources`/`powheg_parameters` override, and is what `powgatory --init` writes when you have no template of your own (see [Quick start](#quick-start)).
 
 ```yaml
 powheg_executable: "./pwhg_main"
@@ -187,7 +187,6 @@ Both `resources` and `powheg_parameters` can be set once at the top level, apply
 ```yaml
 resources:
   batch_system: slurm
-  submission_type: array
   partition: alma
   ntasks: 10                        # used by stage2/stage3/stage4, which don't override it
   time: "24:00:00"
@@ -201,12 +200,6 @@ stages:
       ntasks: 1                     # overrides ntasks just for stage1; batch_system/partition/time/mem still inherited
     powheg_parameters:
       ncall1: 500                   # overrides ncall1 just for stage1
-  stage2:
-    enabled: true
-    resources:
-      ntasks: 3                     # overrides ntasks just for stage2
-      time: "24:00:00"
-      partition: alma
 ```
 
 Further notes:
