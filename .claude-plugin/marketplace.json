@@ -1,0 +1,12 @@
+{
+  "name": "powgatory",
+  "description": "Claude Code plugin for running POWHEG-BOX campaigns with POWgatory",
+  "owner": { "name": "Jakob Linder" },
+  "plugins": [
+    {
+      "name": "powgatory",
+      "source": "./claude-plugin",
+      "description": "Set up, start and monitor POWHEG-BOX runs with POWgatory"
+    }
+  ]
+}

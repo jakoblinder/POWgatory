@@ -17,6 +17,7 @@ This document is the single reference for installing, configuring, and running P
 - [Batch submission details](#batch-submission-details)
 - [Container support](#container-support)
 - [CLI reference](#cli-reference)
+- [Using POWgatory with Claude Code](#using-powgatory-with-claude-code)
 - [Run directory layout](#run-directory-layout)
 - [Troubleshooting](#troubleshooting)
 - [Known limitations](#known-limitations)
@@ -361,6 +362,23 @@ Any additional arguments are passed through to b2luigi/luigi.
 A personal template holds the settings that stay the same from run to run, such as `container_image`, the partition or `powheg_executable`. `--save-template` copies a file to the first of the two user locations and asks before overwriting a template there. The template can also be a symlink, e.g. into a dotfiles repository.
 
 `--show-defaults` prints `powgatory/config/config_default.yaml`, the defaults every `run.yaml` is merged over, with a comment for each option. It is the complete reference of the options, also where this README is not at hand.
+
+## Using POWgatory with Claude Code
+
+This repository is also a Claude Code plugin marketplace. Its plugin `powgatory` brings a skill that tells Claude how to set up, start, monitor and debug POWgatory runs, so you can ask Claude in any run directory, e.g. "start a POWHEG run with 200 seeds from this powheg.input-save". Install it once:
+
+```
+/plugin install powgatory --marketplace jakoblinder/POWgatory
+```
+
+With Claude Code older than 2.1.275, in two steps:
+
+```
+/plugin marketplace add jakoblinder/POWgatory
+/plugin install powgatory@powgatory
+```
+
+Get a newer version of the skill with `claude plugin update powgatory@powgatory` (then `/reload-plugins` in an open session); a new version is published by raising `version` in `claude-plugin/.claude-plugin/plugin.json`. The skill itself is `claude-plugin/skills/powgatory/SKILL.md`. Claude still asks before it starts a run, and the skill tells it to show what would be submitted first.
 
 ## Run directory layout
 
