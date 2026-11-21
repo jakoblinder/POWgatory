@@ -92,8 +92,8 @@ cp /path/to/powheg-box/pwhg_main .
 cp /path/to/powheg-box/powheg.input-save .
 cp /path/to/powheg-box/pwgseeds.dat-save .   # optional: falls back to a bundled default
 
-# Start from the packaged example configuration and edit it
-cp "$(python -c 'import powgatory, pathlib; print(pathlib.Path(powgatory.__file__).parent / "config" / "example.yaml")')" run.yaml
+# Write run.yaml from your template (or the packaged example) and edit it
+powgatory --init
 $EDITOR run.yaml
 
 # Submit the workflow
@@ -262,6 +262,8 @@ Only the actual POWHEG-execution task (`POWHEGStage`) runs inside the container;
 
 ```
 powgatory -c run.yaml [run2.yaml ...] [OPTIONS]
+powgatory --init [FILE]
+powgatory --save-template FILE
 
 Options:
   -c, --config_file FILE [FILE ...]   Path to one or more run.yaml files (required)
@@ -269,9 +271,19 @@ Options:
   --dry-run                           Print what would be submitted, without submitting
   -v, --verbose                       Print the resolved configuration file path(s)
   --version                           Print the installed version and exit
+  --init [FILE]                       Write a run config to start from into FILE (default: run.yaml) and exit
+  --save-template FILE                Save FILE as your own template for --init and exit
 ```
 
 Any additional arguments are passed through to b2luigi/luigi.
+
+`--init` never overwrites an existing file. It copies the first template that exists:
+
+1. the file named by `$POWGATORY_TEMPLATE`, if set,
+2. `~/.config/powgatory/template.yaml`,
+3. the packaged `powgatory/config/example.yaml`.
+
+A personal template holds the settings that stay the same from run to run, such as `container_image`, the partition or `powheg_executable`. `--save-template` copies a file to the first of the two user locations and asks before overwriting a template there. The template can also be a symlink, e.g. into a dotfiles repository.
 
 ## Run directory layout
 

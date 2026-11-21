@@ -8,10 +8,14 @@ Usage:
     powgatory -c config.yaml                          # Run full workflow
     powgatory -c config1.yaml config2.yaml            # Run multiple workflows
     powgatory -c config.yaml --dry-run                # Show what would be done
+    powgatory --init                                  # Write a run.yaml to start from
+    powgatory --save-template my.yaml                 # Make my.yaml the template for --init
 """
 
 import argparse
 import fcntl
+import os
+import shutil
 import sys
 import threading
 import time
@@ -88,6 +92,46 @@ def lock_run_directories(run_dirs):
     return lock_files
 
 
+def user_template_paths() -> list:
+    """
+    Where a user's own run.yaml template is looked up, in this order: $POWGATORY_TEMPLATE, if
+    set, then ~/.config/powgatory/template.yaml.
+    """
+    paths = [Path.home() / ".config" / "powgatory" / "template.yaml"]
+    if os.environ.get("POWGATORY_TEMPLATE"):
+        paths.insert(0, Path(os.environ["POWGATORY_TEMPLATE"]).expanduser())
+    return paths
+
+
+def write_run_config(destination: Path):
+    """Copy the user's template, or else the packaged example.yaml, to destination."""
+    if destination.exists():
+        sys.exit(f"{destination} already exists, not overwritten.")
+
+    user_templates = [path for path in user_template_paths() if path.exists()]
+    if user_templates:
+        template = user_templates[0]
+    else:
+        template = Path(__file__).parent / "config" / "example.yaml"
+
+    shutil.copyfile(template, destination)
+    print(f"Wrote {destination} from {template}")
+
+
+def save_template(source: Path):
+    """Copy source to where write_run_config looks first, asking before overwriting a template."""
+    if not source.exists():
+        sys.exit(f"{source} does not exist.")
+
+    template = user_template_paths()[0]
+    if template.exists() and input(f"{template} already exists. Overwrite it? [y/N] ").strip().lower() != "y":
+        sys.exit("Template not saved.")
+
+    template.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, template)
+    print(f"Saved {source} as the template for powgatory --init: {template}")
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser."""
     parser = argparse.ArgumentParser(
@@ -98,7 +142,12 @@ def create_parser() -> argparse.ArgumentParser:
 Examples:
   powgatory -c config.yaml                      Run full workflow
   powgatory -c config.yaml --dry-run            Show what would be done
+  powgatory --init                              Write run.yaml to start a new run from
+  powgatory --save-template my.yaml             Use my.yaml as the template for --init
 
+--init copies the first template that exists: $POWGATORY_TEMPLATE,
+~/.config/powgatory/template.yaml, or the packaged example.yaml.
+--save-template writes to the first of the two user locations.
 '''
     )
 
@@ -129,6 +178,20 @@ Examples:
     )
 
     parser.add_argument(
+        '--init',
+        nargs='?',
+        const='run.yaml',
+        metavar='FILE',
+        help='Write a run config to start from into FILE (default: run.yaml) and exit'
+    )
+
+    parser.add_argument(
+        '--save-template',
+        metavar='FILE',
+        help='Save FILE as your own template for --init and exit'
+    )
+
+    parser.add_argument(
         '--workers',
         type=int,
         default=250,
@@ -151,6 +214,12 @@ def run_workflow():
 
     if args.version:
         print(f"powgatory version {__version__}")
+        return 0
+    elif args.init:
+        write_run_config(Path(args.init))
+        return 0
+    elif args.save_template:
+        save_template(Path(args.save_template))
         return 0
     else:
         print(f"Start powgatory ({__version__})")
