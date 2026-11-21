@@ -354,17 +354,6 @@ class POWHEGStage(POWHEGBaseTask):
         return run_dir
 
     @property
-    def env_script(self) -> str:
-        """
-        b2luigi setting, i.e. overwrite of b2luigi.set_setting("env_script", <value>) for this task.
-
-        Returns:
-            Script to set up the environment for this task.
-        """
-        run_dir = str(self.config['job_settings']['run_dir'])
-        return f"{run_dir}/bootstrap.sh"
-
-    @property
     def task_file_dir(self) -> str:
         """
         b2luigi setting, i.e. overwrite of b2luigi.set_setting("task_file_dir", <value>) for this task.
@@ -402,7 +391,6 @@ class POWHEGStage(POWHEGBaseTask):
 
         Make sure the python executable is used for tasks which was used to run the workflow.
         This is important if virtual environments in combination with batch jobs are used.
-        Alternatively the virtual environment could be activated in the bootstrap.sh script.
 
         Returns:
             Python executable to use for this task, formatted as a list for easy concatenation with other commands.

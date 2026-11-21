@@ -4,7 +4,6 @@ POWHEG-BOX b2luigi workflow configuration manager
 
 """
 from pathlib import Path
-import os
 import yaml
 import sys
 import subprocess
@@ -42,7 +41,7 @@ class POWHEGConfig:
 
 
         # Make sure the executables, powheg_input_template, and powheg_seeds_template are absolute paths
-        for key in ["powheg_executable", "lhef_executable", "pythia_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "config_dir", "cwd"]:
+        for key in ["powheg_executable", "lhef_executable", "pythia_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "cwd"]:
             if key in self.config:
                 self.config[key] = Path(self.config[key]).resolve()
 
@@ -91,8 +90,6 @@ class POWHEGConfig:
         for warning in self.validate_workflow_structure():
             print(warning)
 
-        self.setup_environment()
-
         print(f"Configuration loaded from {self['config_file']}:")
         for key, value in self.items():
             print(f"  {key}: {value}")
@@ -124,7 +121,6 @@ class POWHEGConfig:
         config_dict['powheg_seeds_template'] = pwgseeds_default.resolve()
 
         config_dict['script_dir'] = package_path / "scripts"
-        config_dict['config_dir'] = package_path / "config"
 
         if config_dict["powheg_parameters"] == None:
             config_dict["powheg_parameters"] = {}
@@ -193,22 +189,6 @@ class POWHEGConfig:
 
         return days * 86400 + h * 3600 + m * 60 + s
 
-    def setup_environment(self):
-        """Configure environment variables and the bootstrap script for the tasks."""
-        os.environ['POWHEG_RUN_DIR']     = str(self['job_settings']['run_dir'])
-        os.environ['POWHEG_LOG_DIR']     = str(self['job_settings']['log_dir'])
-
-        # Copy bootstrap.sh to run directory and save its path in self.bootstrap_script_path
-        bootstrap_script_path = self['job_settings']['run_dir'] / "bootstrap.sh"
-        # Adjust paths in the bootstrap script to point to the correct output and log directories
-        with open(self['config_dir'] / "bootstrap.sh", 'r') as f:
-            content = f.read()
-            content = content.replace("{{POWHEG_RUN_DIR}}", str(self['job_settings']['run_dir']))
-            content = content.replace("{{POWHEG_LOG_DIR}}", str(self['job_settings']['log_dir']))
-
-        with open(bootstrap_script_path, 'w') as f:
-            f.write(content)
-
     @classmethod
     def from_yaml(cls, config_file: str) -> 'POWHEGConfig':
         """Create config instance from YAML file."""
@@ -234,7 +214,7 @@ class POWHEGConfig:
         """Return the configuration dictionary."""
         output_dict = self.config.copy()
         # Convert Path objects to strings for serialization
-        for key in ["powheg_executable", "lhef_executable", "pythia_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "config_dir", "cwd", "python"]:
+        for key in ["powheg_executable", "lhef_executable", "pythia_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "cwd", "python"]:
             if key in output_dict:
                 output_dict[key] = str(output_dict[key])
         for key in ["run_dir", "log_dir"]:

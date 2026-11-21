@@ -323,7 +323,6 @@ A personal template holds the settings that stay the same from run to run, such 
 
 Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 
-- `bootstrap.sh` — generated per-run from `powgatory/config/bootstrap.sh`; sourced at the start of every batch job. Prints diagnostic job info and sources an optional `<run_dir>/.env` for user environment setup (module loads, library paths, etc.).
 - `task_files/` — b2luigi's generated submission scripts.
 - `logs/<job_code>/` — POWHEG stdout/stderr per branch, bracketed with `<Started-POWHEG:...>`/`<Finished-POWHEG:...>` markers that `POWHEGStageTimings` parses.
 - `timings.yaml` — per-stage timing statistics (shortest/longest/average/total), updated as each stage completes.

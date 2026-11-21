@@ -58,7 +58,6 @@ include = ["powgatory*"]
 [tool.setuptools.package-data]
 powgatory = [
     "config/*.yaml",
-    "config/*.sh",
     "config/pwgseeds.dat-save",
     "scripts/*.sh",
 ]

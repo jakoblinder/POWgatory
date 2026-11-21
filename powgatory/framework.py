@@ -40,7 +40,6 @@ class Task(b2luigi.Task):
         return ()
 
     def base_path(self):
-        # return os.environ.get('POWHEG_RUN_DIR', os.getcwd())
         raise NotImplementedError("Subclasses must implement base_path() to define output paths.")
 
     def local_path(self, *path):
