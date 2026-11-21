@@ -337,6 +337,7 @@ Only the actual POWHEG-execution task (`POWHEGStage`) runs inside the container;
 powgatory -c run.yaml [run2.yaml ...] [OPTIONS]
 powgatory --init [FILE]
 powgatory --save-template FILE
+powgatory --show-defaults
 
 Options:
   -c, --config_file FILE [FILE ...]   Path to one or more run.yaml files (required)
@@ -346,6 +347,7 @@ Options:
   --version                           Print the installed version and exit
   --init [FILE]                       Write a run config to start from into FILE (default: run.yaml) and exit
   --save-template FILE                Save FILE as your own template for --init and exit
+  --show-defaults                     Print the default configuration, with every option and its explanation, and exit
 ```
 
 Any additional arguments are passed through to b2luigi/luigi.
@@ -357,6 +359,8 @@ Any additional arguments are passed through to b2luigi/luigi.
 3. the packaged `powgatory/config/example.yaml`.
 
 A personal template holds the settings that stay the same from run to run, such as `container_image`, the partition or `powheg_executable`. `--save-template` copies a file to the first of the two user locations and asks before overwriting a template there. The template can also be a symlink, e.g. into a dotfiles repository.
+
+`--show-defaults` prints `powgatory/config/config_default.yaml`, the defaults every `run.yaml` is merged over, with a comment for each option. It is the complete reference of the options, also where this README is not at hand.
 
 ## Run directory layout
 

@@ -10,6 +10,7 @@ Usage:
     powgatory -c config.yaml --dry-run                # Show what would be done
     powgatory --init                                  # Write a run.yaml to start from
     powgatory --save-template my.yaml                 # Make my.yaml the template for --init
+    powgatory --show-defaults                         # Print all options with their defaults
 """
 
 import argparse
@@ -144,6 +145,7 @@ Examples:
   powgatory -c config.yaml --dry-run            Show what would be done
   powgatory --init                              Write run.yaml to start a new run from
   powgatory --save-template my.yaml             Use my.yaml as the template for --init
+  powgatory --show-defaults                     Print all options with their defaults
 
 --init copies the first template that exists: $POWGATORY_TEMPLATE,
 ~/.config/powgatory/template.yaml, or the packaged example.yaml.
@@ -192,6 +194,12 @@ Examples:
     )
 
     parser.add_argument(
+        '--show-defaults',
+        action='store_true',
+        help='Print the default configuration, with every option and its explanation, and exit'
+    )
+
+    parser.add_argument(
         '--workers',
         type=int,
         default=250,
@@ -220,6 +228,10 @@ def run_workflow():
         return 0
     elif args.save_template:
         save_template(Path(args.save_template))
+        return 0
+    elif args.show_defaults:
+        # The defaults that every run.yaml is merged over, with their comments.
+        print((Path(__file__).parent / "config" / "config_default.yaml").read_text(), end="")
         return 0
     else:
         print(f"Start powgatory ({__version__})")
