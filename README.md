@@ -245,6 +245,8 @@ When POWHEG exits with an error, POWgatory moves the branch's output files to `i
 
 luigi's own retries are switched off. A run with a failed branch finishes everything that does not depend on it and ends with `:(`. After fixing the cause, rerun `powgatory`; it resubmits only the incomplete branches.
 
+Only one POWgatory can run per `run_dir`: a second one stops at once with a message. The lock (`<run_dir>/.powgatory.lock`) is released when the first one ends, also after a crash.
+
 ## Container support
 
 If `job_settings.container_image` is set, `POWHEGStage` runs POWHEG inside Apptainer:
@@ -280,6 +282,7 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 - `logs/<job_code>/` — POWHEG stdout/stderr per branch, bracketed with `<Started-POWHEG:...>`/`<Finished-POWHEG:...>` markers that `POWHEGStageTimings` parses.
 - `timings.yaml` — per-stage timing statistics (shortest/longest/average/total), updated as each stage completes.
 - `incomplete_run_backups/` — output files quarantined from a previous failed or killed attempt, or from a POWHEG run that exited with an error.
+- `.powgatory.lock` — held by the running POWgatory, so that a second one on the same `run_dir` stops.
 - POWHEG's own output files (`pwg*.dat`, `pwgevents-*.lhe`, ...) and the `powheg.input`/`pwgseeds.dat` symlinks, written directly into the run directory.
 
 ## Troubleshooting

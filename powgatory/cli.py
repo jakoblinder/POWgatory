@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import fcntl
 import sys
 import threading
 import time
@@ -63,6 +64,29 @@ def _throttled_start_job(self):
 
 SlurmProcess.start_job = _throttled_start_job
 # End of patch!
+
+
+def lock_run_directories(run_dirs):
+    """
+    Take an exclusive lock on every run directory, so that a second POWgatory on the same run
+    directory stops instead of running every branch a second time next to the first one.
+
+    The kernel releases the locks when this process ends, also after a crash. On GPFS (/ptmp) a
+    lock holds across nodes. The returned lock files must stay referenced to keep the locks.
+    """
+    lock_files = []
+    for run_dir in sorted({Path(run_dir).resolve() for run_dir in run_dirs}):
+        lock_path = run_dir / ".powgatory.lock"
+        lock_file = open(lock_path, "w")
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            sys.exit(f"Another POWgatory is already running in {run_dir} (it holds {lock_path}).")
+        except OSError as e:
+            print(f"Warning: could not lock {lock_path} ({e}); a second POWgatory in {run_dir} would not be noticed.")
+        lock_files.append(lock_file)
+    return lock_files
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser."""
@@ -138,6 +162,10 @@ def run_workflow():
     configs = [POWHEGConfig.from_yaml(config_file) for config_file in config_files]
     for config in configs:
         config.validate_run_directory()
+
+    # Batch jobs run this entry point too (with --batch-runner) and must not take the lock.
+    if not args.dry_run and "--batch-runner" not in b2luigi_args:
+        run_dir_locks = lock_run_directories(config["job_settings"]["run_dir"] for config in configs)
 
     primary_config   = configs[0]
     multiple_configs = len(configs) > 1
