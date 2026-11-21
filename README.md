@@ -297,7 +297,7 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 - **A stage silently doesn't run** — check the validation warnings printed at startup; they catch the common cases (e.g. a later stage enabled while its prerequisite is disabled).
 - **`Unknown submission type: mpi`** — your installed `b2luigi` doesn't yet support MPI-style submission; see [Requirements](#requirements).
 - **Container pull fails** — `setup_container()` shells out to `apptainer pull`; check that `apptainer` is on `PATH` on the submission host and that the registry URL is reachable.
-- **A branch fails with `POWHEG failed: ...` or `Output files ... never appeared`** — check the branch's POWHEG log under `logs/<job_code>/` for the actual failure. Re-running `powgatory` resubmits only the branches whose output files are missing.
+- **A branch fails with `pwhg_main failed: ...` (or the name of the analysis program) or `Output files ... never appeared`** — check the branch's POWHEG log under `logs/<job_code>/` for the actual failure. Re-running `powgatory` resubmits only the branches whose output files are missing.
 - **`Stage ... uses partition '...', which sinfo does not report`** — the `resources.partition` of that stage doesn't exist on the cluster you're submitting from; the message lists the partitions that do.
 
 ## Known limitations

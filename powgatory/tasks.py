@@ -643,8 +643,11 @@ class POWHEGStage(POWHEGBaseTask):
         else:
             self.publish_message(f"Running {self.stage}, branch {self.branch_id}")
 
-        # Execute POWHEG
-        self._run_powheg(job_code=job_code, task_id=self.branch_id, apptainer_image=container)
+        self._run_program(job_code        = job_code,
+                          seed            = self.branch_id,
+                          program         = self.config['powheg_executable'],
+                          apptainer_image = container,
+                          working_dir     = self.config['job_settings']['run_dir'])
 
         self._wait_for_stage_output()
 
@@ -666,7 +669,7 @@ class POWHEGStage(POWHEGBaseTask):
             time.sleep(delay)
 
         raise RuntimeError(
-            f"Output files for stage {self.stage_number}, branch {self.branch_id} "
+            f"Output files for stage {self.stage_name}, branch {self.branch_id} "
             f"never appeared after {retries} retries."
         )
 
@@ -722,35 +725,36 @@ class POWHEGStage(POWHEGBaseTask):
 
         return backup_dir is not None
 
-    def _run_powheg(self, job_code: str, task_id: int, apptainer_image: str=None):
-        """Execute POWHEG for this task."""
+    def _run_program(self, job_code: str, seed: int, program: str, apptainer_image: str, working_dir: str, event_file: str = ""):
+        """
+        Run program (pwhg_main, or an analysis program, which also gets an event file) for this
+        branch in working_dir, via scripts/run_program.sh.
+        """
         if apptainer_image:
-            self.publish_message(f"Running POWHEG in container: {apptainer_image}")
+            self.publish_message(f"Running in container: {apptainer_image}")
             cmd = ["apptainer", "exec", "--bind", f"{self.config['cwd']}:{self.config['cwd']}", str(apptainer_image)]
         else:
             # No prefix: the job script is run directly. Process replacement is the
-            # script's own job (pwhg_run.sh execs POWHEG), since "exec" is a shell
+            # script's own job (run_program.sh execs the program), since "exec" is a shell
             # builtin and subprocess.run() does not go through a shell.
             cmd = []
 
-        pwhg_main = self.config['powheg_executable']
-
         log_file = self._powheg_log_file()
 
-        def call_job_script(script, job_code, task_id, program, log_file=""):
+        def call_job_script(script, job_code, seed, program, log_file="", event_file=""):
             """
-            Call the pwhg_run.sh script with the correct arguments.
+            Call the run_program.sh script with the correct arguments.
 
-            script, job_code, task_id, program, log_file=""
+            script, job_code, seed, program, log_file="", event_file=""
             """
-            inputs     = [script, job_code, task_id, program, log_file]
-            cmd_script = [str(i) for i in inputs if i]  # Convert to strings and filter out empty log_file
+            inputs     = [script, job_code, seed, program, log_file, event_file]
+            cmd_script = [str(i) for i in inputs if i]  # Convert to strings and filter out empty log_file/ event_file
 
             return cmd_script
 
-        cmd += call_job_script(Path(self.config["script_dir"]) / "pwhg_run.sh", job_code, task_id, pwhg_main, log_file)
+        cmd += call_job_script(Path(self.config["script_dir"]) / "run_program.sh", job_code, seed, program, log_file, event_file)
 
-        self.publish_message(f"Executing command: {' '.join(cmd)} in {str(self.config['job_settings']['run_dir'])}")
+        self.publish_message(f"Executing command: {' '.join(cmd)} in {working_dir}")
         self.publish_message(f"Logging output to: {log_file}")
         with open(log_file, 'w') as logf:
             # Write start time to log file. E.g. <Started-POWHEG:p1-x1-s1=2026-07-20T08:10:05.858527+00:00>.
@@ -759,14 +763,14 @@ class POWHEGStage(POWHEGBaseTask):
         try:
             subprocess.run(
                 cmd,
-                cwd=self.config['job_settings']['run_dir'],
+                cwd=working_dir,
                 check=True,
             )
         except subprocess.CalledProcessError as e:
             # POWHEG's pwhg_exit writes the counters file also when POWHEG fails, so the branch
             # would count as complete. The log stays in place; the next attempt moves it.
             self._move_to_backup(self._output_paths())
-            raise RuntimeError(f"POWHEG failed: {e}")
+            raise RuntimeError(f"{Path(program).name} failed: {e}")
         finally:
             with open(log_file, 'a') as logf:
                 logf.write(f"<Finished-POWHEG:{job_code}={datetime.now(ZoneInfo('Europe/Berlin')).isoformat()}>\n")
