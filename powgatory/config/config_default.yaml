@@ -8,6 +8,8 @@
 powheg_executable: "./pwhg_main"
 powheg_input_template: "powheg.input-save"
 powheg_seeds_template: "pwgseeds.dat-save"  # Optional
+lhef_executable: "./lhef_analysis"          # Used by the stage lhef
+pythia_executable: "./main-PYTHIA82-lhef"   # Used by the stage pythia
 
 # ============================================================================
 # JOB SUBMISSION SETTINGS
@@ -69,11 +71,22 @@ stages:
   stage4:
     enabled: true
 
-  analysis:
-    enabled: false                     # Enable after stage 4 completes
-    lhef: true
-    pythia: true
+  # Analysis of the stage-4 event files, one run per stage-4 seed, in <run_dir>/lhef/ and
+  # <run_dir>/pythia/. The number of runs is stage4's ntasks; the other resources and the
+  # powheg_parameters can be set per stage, as for stages 1-4.
+  lhef:
+    enabled: false
+    # Multiply the event weights by ub_btilde_corr/ub_remn_corr from pwgcounters-st4-<seed>.dat
+    # (needs ubexcess_correct 1 in the POWHEG input).
     weight_correction: true
+    # Further files or directories the program needs, linked into <run_dir>/lhef/. Paths are
+    # relative to the directory powgatory is started from, or absolute; glob patterns allowed.
+    link_files: []
+
+  pythia:
+    enabled: false
+    weight_correction: true
+    link_files: []
 
   addweights:
     enabled: false                     # Enable to add reweighting to events

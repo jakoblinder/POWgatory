@@ -11,6 +11,7 @@ This document is the single reference for installing, configuring, and running P
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Pipeline architecture](#pipeline-architecture)
+- [Analysis stages](#analysis-stages)
 - [Configuration reference](#configuration-reference)
 - [Batch submission details](#batch-submission-details)
 - [Container support](#container-support)
@@ -27,6 +28,7 @@ A POWHEG-BOX calculation runs in several sequential stages (grid generation, int
 - One `run.yaml` file per campaign describes the POWHEG executable, the stages to run, per-stage resource requests, and POWHEG parameter overrides.
 - b2luigi resolves the task dependency graph and submits per-seed jobs to Slurm (or runs them as local subprocesses for testing), including grouping many seeds into a single array or multi-node job where configured.
 - Each stage's completion is detected from the actual POWHEG output files it produces, and per-seed run times are parsed from job logs and recorded in a `timings.yaml` in the run directory.
+- Optional analysis stages run the LHEF analysis and the PYTHIA shower on every stage-4 event file, with POWHEG's upper bound weight correction.
 - Optional Apptainer/Singularity container execution and a one-off pre-submission shell hook are supported.
 
 ## Requirements
@@ -127,10 +129,39 @@ POWHEGStage1(grid=1) → POWHEGStage1(grid=2) → POWHEGStage1(grid=3)
                                                POWHEGStage4
 ```
 
+The analysis stages `lhef` and `pythia` (see [Analysis stages](#analysis-stages)) both wait for stage 4, and `POWHEGWorkflow` also requires their `POWHEGStageTimings` when they are enabled.
+
 `POWHEGMultiConfigWorkflow` lets a single CLI invocation submit several independent `run.yaml`s at once.
 
 A failed POWHEG run inside `POWHEGStage` (non-zero exit code) raises a `RuntimeError`, which fails that branch's b2luigi task. A branch that exits cleanly but whose output files never appear also fails, after a short polling window that allows for slow cluster filesystems. `POWHEGStage.complete()` checks for the expected POWHEG output files, not an exit code; both 4-digit (`-0042`) and 5-digit (`-12345`) seed suffixes are accepted, so runs with more than 9999 seeds work. Stale output files from a previous failed/killed attempt are moved into `incomplete_run_backups/` before each run so POWHEG (which refuses to overwrite an existing event file) doesn't choke on them.
 
+## Analysis stages
+
+The stages `lhef` and `pythia` run `lhef_executable` (e.g. `lhef_analysis`) and `pythia_executable` (e.g. `main-PYTHIA82-lhef`) once per stage-4 seed, on that seed's event file. Their number of branches is stage 4's `ntasks`; all other `resources` and the `powheg_parameters` can be set per stage, as for stages 1-4. Each stage works in its own directory, `<run_dir>/lhef/` or `<run_dir>/pythia/`, so the outputs of the two analyses stay apart, and the `powheg.input` of stages 1-4 stays untouched:
+
+```
+POWHEGStageTimings(stage4) → POWHEGWeightCorrection → POWHEGAnalysisSetup(lhef) → POWHEGAnalysis(lhef) × seeds → POWHEGStageTimings(lhef)
+                                                    → POWHEGAnalysisSetup(pythia) → POWHEGAnalysis(pythia) × seeds → POWHEGStageTimings(pythia)
+```
+
+- **`POWHEGWeightCorrection`** runs once, locally, if a stage has `weight_correction: true`. For every seed it computes the upper bound correction factors `ub_btilde_corr` and `ub_remn_corr` from that seed's `pwgcounters-st4-<seed>.dat`, and writes them into `<run_dir>/ub_corrections.yaml`. A factor is the cross section estimated during the event generation divided by the one used for it and by the bound violation correction factor. It exists only for an event type whose weights were corrected for upper bound violations, i.e. whose bound violation correction factor is not 1; without such corrections, the estimate differs from the cross section used only by its statistical error. This is the logic of POWHEG-BOX's `FindReweightFromCounters.py`, which is also available as `python -m powgatory.ub_correction pwgcounters-st4-*.dat`. The counters contain these numbers only with `ubexcess_correct 1` in the POWHEG input.
+- **`POWHEGAnalysisSetup`** writes `<seed>-powheg.input` per seed: the template with the stage's `powheg_parameters`, like the input files of stages 1-4, plus the seed's correction factors if the stage has `weight_correction: true`. It links the event files in (`pwgevents-0001.lhe -> ../pwgevents-0001.lhe`), and the stage's `link_files`, for programs that need further files.
+- **`POWHEGAnalysis`** runs the program with the seed and then the event file on stdin (`scripts/run_program.sh`). Without a `powheg.input` in their directory, the POWHEG programs take the first line as prefix of their input file, read `<seed>-powheg.input`, and multiply the event weights by the factors in it. A branch is complete when its histogram file exists and is non-empty: `pwgLHEF_analysis-<seed>.top` or `pwgoutput_py8_histos-<seed>.top`, the names in `lhef_analysis.f` and `main-PYTHIA8.f`. With several event weights (e.g. scale variations via `rwl_file`), the programs write one file per weight instead, `...-<seed>-W1.top`, `...-W2.top`, ..., and `-W1` is checked. A program that names its histograms differently needs its name in `ANALYSIS_OUTPUT_NAMES` in `powgatory/tasks.py`, a list per stage; any of the names counts.
+
+```yaml
+lhef_executable: "./lhef_analysis"
+pythia_executable: "./main-PYTHIA82-lhef"
+
+stages:
+  lhef:
+    enabled: true
+    weight_correction: true                     # Apply ub_btilde_corr/ub_remn_corr
+    link_files: ["powheg_output/FlavRegList"]   # Relative to the start directory, or absolute; globs allowed
+  pythia:
+    enabled: true
+    resources:
+      time: "48:00:00"
+```
 ## Configuration reference
 
 `run.yaml` is merged against `powgatory/config/config_default.yaml`, which ships only the minimal set of keys needed to run and is reproduced below as the schema reference. `powgatory/config/example.yaml` holds only the settings most runs change, including a per-stage `resources`/`powheg_parameters` override, and is what `powgatory --init` writes when you have no template of your own (see [Quick start](#quick-start)).
@@ -139,6 +170,8 @@ A failed POWHEG run inside `POWHEGStage` (non-zero exit code) raises a `RuntimeE
 powheg_executable: "./pwhg_main"
 powheg_input_template: "powheg.input-save"
 powheg_seeds_template: "pwgseeds.dat-save"   # optional; falls back to a bundled seeds file
+lhef_executable: "./lhef_analysis"          # program of the stage lhef
+pythia_executable: "./main-PYTHIA82-lhef"   # program of the stage pythia
 
 job_settings:
   job_name: "powheg"
@@ -164,6 +197,14 @@ stages:
     enabled: true
   stage4:
     enabled: true
+  lhef:                             # see Analysis stages
+    enabled: false
+    weight_correction: true
+    link_files: []
+  pythia:
+    enabled: false
+    weight_correction: true
+    link_files: []
 
 resources:                          # applies to every stage unless overridden per stage (see below)
   batch_system: slurm                # "local" (GNU-parallel-style subprocess execution) or "slurm"
@@ -206,7 +247,7 @@ Further notes:
 
 - `batch_system: local` ignores `partition` and runs each branch as a local subprocess instead of submitting to Slurm (useful for testing without cluster access).
 - `container_image` accepts a registry URL (pulled once into `<run_dir>/powheg.sif` via `apptainer pull`), a local file path (copied into the run directory, or used in place with `copy_container_image: false`), or an empty string to run without a container.
-- The config file also defines `stage3.grid_combination`, a `stage3_gridcombine` stage, and `analysis`/`addweights` stages. **These are configuration placeholders only** — see [Known limitations](#known-limitations).
+- The config file also defines `stage3.grid_combination`, a `stage3_gridcombine` stage, and an `addweights` stage. **These are configuration placeholders only** — see [Known limitations](#known-limitations).
 
 ## Batch submission details
 
@@ -288,6 +329,8 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 - `timings.yaml` — per-stage timing statistics (shortest/longest/average/total), updated as each stage completes.
 - `incomplete_run_backups/` — output files quarantined from a previous failed or killed attempt, or from a POWHEG run that exited with an error.
 - `.powgatory.lock` — held by the running POWgatory, so that a second one on the same `run_dir` stops.
+- `ub_corrections.yaml` — the upper bound correction factors of every stage-4 seed, if an analysis stage has `weight_correction: true`.
+- `lhef/`, `pythia/` — the analysis stages' `<seed>-powheg.input` files, links to the event files and `link_files`, and the programs' outputs.
 - POWHEG's own output files (`pwg*.dat`, `pwgevents-*.lhe`, ...) and the `powheg.input`/`pwgseeds.dat` symlinks, written directly into the run directory.
 
 ## Troubleshooting
@@ -304,7 +347,8 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 
 This reflects the current state of the code, so gaps are documented rather than hidden:
 
-- `stage3.grid_combination`, the `stage3_gridcombine` stage, and the `analysis`/`addweights` stages are all present in the configuration schema but have **no corresponding task implementation** — enabling them has no effect. `powgatory/scrap.py` contains an old, unused draft of this work and is not imported anywhere.
+- `stage3.grid_combination`, the `stage3_gridcombine` stage, and the `addweights` stage are all present in the configuration schema but have **no corresponding task implementation** — enabling them has no effect. `powgatory/scrap.py` contains an old, unused draft of this work and is not imported anywhere.
+- `lhef_analysis` writes its `.top` files already every 20000 events, not only at the end. An analysis branch with more events per seed that is killed during the run can leave files that count as complete; delete them to rerun that seed.
 - `submission_type: array` and `mpi` depend on unreleased `b2luigi` functionality, installed from a fork (see [Requirements](#requirements)).
 - For `submission_type: mpi`, the live `sinfo` data in `POWHEGStage.partition_info` is not yet passed on to b2luigi; b2luigi packs sub-tasks onto nodes using its own `tasks_per_node` setting (default 64), which must match the partition.
 - A job that hangs before POWgatory has moved an earlier attempt's log aside is not detected as hung, because that old log already shows POWHEG output. Such a job sits until its Slurm time limit and its branch fails; `scancel` it and rerun `powgatory`.

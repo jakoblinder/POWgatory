@@ -9,6 +9,7 @@ This module implements the POWHEG workflow using b2luigi (BELLE2 Luigi):
 """
 
 import b2luigi
+import glob
 import os
 import re
 import time
@@ -22,7 +23,8 @@ import yaml
 
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapperTask
-from .config import POWHEGConfig
+from .config import POWHEGConfig, ANALYSIS_STAGES
+from .ub_correction import correction_factors
 
 
 def seed_strings(seed: int) -> List[str]:
@@ -783,7 +785,7 @@ class POWHEGStageTimings(POWHEGBaseTask):
 
     stage = b2luigi.Parameter(
         default="stage1",
-        description="POWHEG stage number (stage1, stage2, stage3, stage4)"
+        description="POWHEG stage number (stage1, stage2, stage3, stage4, lhef, pythia)"
     )
     grid_iteration = b2luigi.IntParameter(
         default=-1,
@@ -950,13 +952,203 @@ class POWHEGStageTimings(POWHEGBaseTask):
         self.publish_message(f"Wrote timing summary to {output_target}")
 
 
+##########################################################
+# Analysis stages (lhef, pythia) of the stage-4 events #
+##########################################################
+# Names of the histogram file the program of an analysis stage writes, without seed and ".top";
+# a branch is complete when the file of any of them is there. "pwg" is the part of the event file
+# name pwgevents-<seed>.lhe before "events", then comes the name in the program's source
+# (lhef_analysis.f, main-PYTHIA8.f), which can differ between processes.
+ANALYSIS_OUTPUT_NAMES = {
+    "lhef":   ["pwgLHEF_analysis"],
+    "pythia": ["pwgoutput_py8_histos"],
+}
+
+
+def stage4_seeds(config) -> range:
+    """The seeds of stage 4, i.e. of the event files the analysis stages read."""
+    return range(1, config["stages"]["stage4"]["resources"]["ntasks"] + 1)
+
+
+def seed_file(directory: Path, pattern: str, seed: int) -> Path:
+    """
+    The file named by pattern (e.g. "pwgevents-{seed}.lhe") in directory, with the seed in four
+    digits, or else in five digits (see seed_strings).
+    """
+    four_digits, five_digits = (directory / pattern.format(seed=seed_string) for seed_string in seed_strings(seed))
+    if four_digits.exists():
+        return four_digits
+    else:
+        return five_digits
+
+
+class POWHEGWeightCorrection(POWHEGBaseTask):
+    """
+    Upper bound correction factors (ub_btilde_corr, ub_remn_corr) of every stage-4 seed, from its
+    own pwgcounters-st4-<seed>.dat, written once into ub_corrections.yaml for all analysis stages.
+    """
+    batch_system = "local"
+
+    @property
+    def stage_name(self) -> str:
+        return "weight_correction"
+
+    def requires(self):
+        yield POWHEGStageTimings(stage=self.get_stage_str(4), version=self.version, config=self.config)
+
+    def output(self):
+        return self.local_target("ub_corrections.yaml")
+
+    def complete(self):
+        """Complete when ub_corrections.yaml lists every stage-4 seed (stage 4 may have got more)."""
+        if not self.output().exists():
+            return False
+
+        with self.output().open("r") as handle:
+            factors = yaml.safe_load(handle) or {}
+
+        return set(stage4_seeds(self.config)) <= set(factors)
+
+    def run(self):
+        run_dir = Path(self.config["job_settings"]["run_dir"])
+
+        factors = {}
+        for seed in stage4_seeds(self.config):
+            counters_file = seed_file(run_dir, "pwgcounters-st4-{seed}.dat", seed)
+            factors[seed] = correction_factors([counters_file])
+            if factors[seed]:
+                self.publish_message(f"Seed {seed}: {factors[seed]}")
+
+        with self.output().open("w") as handle:
+            yaml.safe_dump(factors, handle, sort_keys=False)
+
+
+class POWHEGAnalysisSetup(POWHEGStageSetup):
+    """
+    Setup of an analysis stage (lhef or pythia) in its own directory <run_dir>/<stage>/: one input
+    file <seed>-powheg.input per stage-4 seed, the event files and the stage's link_files.
+
+    The analysis programs read, without a powheg.input in their directory, first the prefix of
+    their input file (the seed) and then the event file (see scripts/run_program.sh). The input
+    files are the template with the stage's powheg_parameters, as for stages 1-4, plus the seed's
+    upper bound correction factors if the stage has weight_correction.
+    """
+
+    def requires(self):
+        yield POWHEGStageTimings(stage=self.get_stage_str(4), version=self.version, config=self.config)
+        if self.config["stages"][self.stage]["weight_correction"]:
+            yield POWHEGWeightCorrection(version=self.version, config=self.config)
+
+    def output(self):
+        return [self.local_target(self.stage, f"{seed}-powheg.input") for seed in stage4_seeds(self.config)]
+
+    def run(self):
+        # Resolved first, so that a pattern without a match stops the setup before it writes its
+        # outputs, which would otherwise count as complete in the next run.
+        link_targets = self._link_file_targets()
+
+        run_dir   = Path(self.config["job_settings"]["run_dir"])
+        stage_dir = run_dir / self.stage
+        stage_dir.mkdir(exist_ok=True)
+
+        if self.config["stages"][self.stage]["weight_correction"]:
+            with POWHEGWeightCorrection(version=self.version, config=self.config).output().open("r") as handle:
+                factors = yaml.safe_load(handle)
+        else:
+            factors = {}
+
+        for seed in stage4_seeds(self.config):
+            powheg_params = dict(self.config["stages"][self.stage]["powheg_parameters"])
+            powheg_params.update(factors.get(seed, {}))
+            self.change_param(self.config["powheg_input_template"], stage_dir / f"{seed}-powheg.input", powheg_params)
+
+            # A relative link: the programs take everything before "events" in the name as prefix
+            # of their output files, so "../pwgevents-0001.lhe" would put the outputs into run_dir.
+            event_file = seed_file(run_dir, "pwgevents-{seed}.lhe", seed)
+            self._link(stage_dir / event_file.name, Path("..") / event_file.name)
+
+        for link_target in link_targets:
+            self._link(stage_dir / link_target.name, link_target)
+
+    def _link_file_targets(self) -> List[Path]:
+        """The files matched by the stage's link_files, relative to cwd or absolute, glob patterns allowed."""
+        targets = []
+        for pattern in self.config["stages"][self.stage]["link_files"]:
+            matches = sorted(glob.glob(str(Path(self.config["cwd"]) / pattern)))
+            if not matches:
+                raise FileNotFoundError(f"link_files of stage {self.stage}: {pattern} matches no file.")
+            targets += [Path(match) for match in matches]
+
+        names = [target.name for target in targets]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValueError(f"link_files of stage {self.stage}: several files are named {', '.join(duplicates)}.")
+
+        return targets
+
+    @staticmethod
+    def _link(link: Path, target: Path):
+        """Point link at target, replacing an earlier link, but never a real file of that name."""
+        if link.is_symlink():
+            link.unlink()
+        link.symlink_to(target)
+
+
+class POWHEGAnalysis(POWHEGStage):
+    """
+    One run of an analysis stage (lhef or pythia) on the events of one stage-4 seed, in
+    <run_dir>/<stage>/ with the program <stage>_executable.
+    """
+
+    def requires(self):
+        yield POWHEGAnalysisSetup(stage=self.stage, version=self.version, config=self.config)
+        # Depend on presubmit task, which sets up the container.
+        yield POWHEGPresubmit(version=self.version, config=self.config)
+
+    def output(self):
+        """
+        The histogram file the stage's program writes for this seed, for every name in
+        ANALYSIS_OUTPUT_NAMES and the seed in four or in five digits. With several event weights
+        (rwl_num_weights > 1), pwhgtopout writes one file per weight instead, <name>-W1.top,
+        -W2.top, ..., in this order; -W1 stands for all of them, since their number is only known
+        from the event file.
+        """
+        return [
+            [self.local_target(self.stage, f"{name}-{seed}{weight}.top")]
+            for name in ANALYSIS_OUTPUT_NAMES[self.stage]
+            for seed in seed_strings(self.branch_id)
+            for weight in ("", "-W1")
+        ]
+
+    def run(self):
+        """Run the stage's program on this seed's event file and wait until its output files are written."""
+        self._quarantine_stale_outputs()
+
+        container = self.setup_container()
+
+        job_code   = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)
+        stage_dir  = Path(self.config["job_settings"]["run_dir"]) / self.stage
+        event_file = seed_file(stage_dir, "pwgevents-{seed}.lhe", self.branch_id)
+
+        self.publish_message(f"Running {self.stage}, branch {self.branch_id}")
+
+        self._run_program(job_code        = job_code,
+                          seed            = self.branch_id,
+                          program         = self.config[f"{self.stage}_executable"],
+                          apptainer_image = container,
+                          working_dir     = stage_dir,
+                          event_file      = event_file.name)
+
+        self._wait_for_stage_output()
+
+
 class POWHEGStageWrapper(POWHEGWrapperTask):
     """
     Wrapper task for a POWHEG stage, yielding multiple parallel tasks.
     """
     stage          = b2luigi.Parameter(
                          default="stage1",
-                         description="POWHEG stage number (stage1, stage2, stage3, stage4)"
+                         description="POWHEG stage number (stage1, stage2, stage3, stage4, lhef, pythia)"
                      )
     grid_iteration = b2luigi.IntParameter(
                          default=-1,
@@ -964,14 +1156,20 @@ class POWHEGStageWrapper(POWHEGWrapperTask):
                      )
 
     def requires(self):
-        ntasks = self.config["stages"][f"{self.stage}"]["resources"]['ntasks']
+        if self.stage in ANALYSIS_STAGES:
+            # One analysis run per stage-4 event file.
+            branch_ids = stage4_seeds(self.config)
+            stage_task = POWHEGAnalysis
+        else:
+            branch_ids = range(1, self.config["stages"][f"{self.stage}"]["resources"]['ntasks'] + 1)
+            stage_task = POWHEGStage
 
-        for branch_id in range(1, ntasks + 1):
-            yield POWHEGStage(stage=self.stage,
-                              grid_iteration=self.grid_iteration,
-                              version=self.version,
-                              branch_id=branch_id,
-                              config=self.config)
+        for branch_id in branch_ids:
+            yield stage_task(stage=self.stage,
+                             grid_iteration=self.grid_iteration,
+                             version=self.version,
+                             branch_id=branch_id,
+                             config=self.config)
 
 
 ######################
@@ -987,8 +1185,6 @@ class POWHEGWorkflow(POWHEGWrapperTask):
 
         # if stages_config['addweights']['enabled']:
         #     return POWHEGAddWeights(config_file=self.config_file, version=self.version)
-        # elif stages_config['analysis']['enabled']:
-        #     return POWHEGAnalysis(config_file=self.config_file, version=self.version)
 
         if stages_config['stage4']['enabled']:
             highest_stage = 4
@@ -1006,6 +1202,10 @@ class POWHEGWorkflow(POWHEGWrapperTask):
             yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
         else:
             yield POWHEGStageTimings(stage=self.get_stage_str(highest_stage), version=self.version, config=self.config)
+
+        for analysis_stage in ANALYSIS_STAGES:
+            if stages_config[analysis_stage]['enabled']:
+                yield POWHEGStageTimings(stage=analysis_stage, version=self.version, config=self.config)
 
 
 class POWHEGMultiConfigWorkflow(POWHEGWrapperTask):

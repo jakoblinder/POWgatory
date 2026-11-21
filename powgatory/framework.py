@@ -85,7 +85,7 @@ class POWHEGBaseTask(Task):
 
     stage          = b2luigi.Parameter(
         default="stage1",
-        description="POWHEG stage number (stage1, stage2, stage3, stage4, stage3_gridcombine, analysis, addweights)"
+        description="POWHEG stage number (stage1, stage2, stage3, stage4, stage3_gridcombine, lhef, pythia, addweights)"
     )
     grid_iteration = b2luigi.IntParameter(
         default=1,

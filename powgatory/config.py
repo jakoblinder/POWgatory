@@ -10,6 +10,10 @@ import sys
 import subprocess
 from typing import Dict, Any, Optional
 
+# Stages that analyse the stage-4 event files, each with its own <stage>_executable.
+ANALYSIS_STAGES = ("lhef", "pythia")
+
+
 class POWHEGConfig:
     """
     Configuration manager that loads run.yaml and queries live per-partition Slurm info.
@@ -37,8 +41,8 @@ class POWHEGConfig:
             self.config["python"] = Path(sys.executable)
 
 
-        # Make sure powheg_executable, powheg_input_template, and powheg_seeds_template are absolute paths
-        for key in ["powheg_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "config_dir", "cwd"]:
+        # Make sure the executables, powheg_input_template, and powheg_seeds_template are absolute paths
+        for key in ["powheg_executable", "lhef_executable", "pythia_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "config_dir", "cwd"]:
             if key in self.config:
                 self.config[key] = Path(self.config[key]).resolve()
 
@@ -230,7 +234,7 @@ class POWHEGConfig:
         """Return the configuration dictionary."""
         output_dict = self.config.copy()
         # Convert Path objects to strings for serialization
-        for key in ["powheg_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "config_dir", "cwd", "python"]:
+        for key in ["powheg_executable", "lhef_executable", "pythia_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "config_dir", "cwd", "python"]:
             if key in output_dict:
                 output_dict[key] = str(output_dict[key])
         for key in ["run_dir", "log_dir"]:
@@ -246,7 +250,7 @@ class POWHEGConfig:
         - Stage 1 (all iterations) → Stage 2
         - Stage 2 → Stage 3 (or Stage 3 GridCombine)
         - Stage 3/GridCombine → Stage 4
-        - Stage 4 → Analysis/AddWeights (optional)
+        - Stage 4 → lhef/pythia/AddWeights (optional)
 
         Args:
             config: POWHEGConfig instance
@@ -283,9 +287,10 @@ class POWHEGConfig:
             if not (has_stage3 or has_gridcombine):
                 warnings.append("WARNING: Stage 4 is enabled but Stage 3 is disabled and grid_combination is not enabled")
 
-        # Check Analysis requires Stage 4
-        if stages.get('analysis', {}).get('enabled', False) and not is_enabled('stage4'):
-            warnings.append("WARNING: Analysis is enabled but Stage 4 is disabled")
+        # Check the analysis stages require Stage 4
+        for analysis_stage in ANALYSIS_STAGES:
+            if is_enabled(analysis_stage) and not is_enabled('stage4'):
+                warnings.append(f"WARNING: Stage {analysis_stage} is enabled but Stage 4 is disabled")
 
         # Check AddWeights requires Stage 4
         if stages.get('addweights', {}).get('enabled', False) and not is_enabled('stage4'):
@@ -349,6 +354,12 @@ class POWHEGConfig:
         # This error is only raised if a user explicitly sets a seeds template that does not exist.
         if not self['powheg_seeds_template'].exists():
             raise FileNotFoundError(f"ERROR: pwgseeds.dat-save not found: {self['powheg_seeds_template']}")
+
+        # Check for the executables of the enabled analysis stages
+        for analysis_stage in ANALYSIS_STAGES:
+            executable = self[f'{analysis_stage}_executable']
+            if self['stages'][analysis_stage]['enabled'] and not executable.exists():
+                raise FileNotFoundError(f"ERROR: Executable of stage {analysis_stage} not found: {executable}")
 
     # Dict-like interface delegation to self.config
     def __getitem__(self, key):
