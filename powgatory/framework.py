@@ -97,6 +97,16 @@ class POWHEGBaseTask(Task):
                                    description="POWHEG configuration dictionary",
                                   )
 
+    @property
+    def retry_count(self) -> int:
+        """
+        luigi disables a task after this many failures, so 1 means luigi never retries it.
+        luigi cannot tell why a task failed, and a POWHEG failure would only fail again with the
+        same seed and input. b2luigi itself resubmits Slurm jobs that were lost, stuck in
+        COMPLETING or hung (see POWHEGStage.slurm_max_resubmissions and job_settings.retries).
+        """
+        return 1
+
     def __repr__(self):
         """
         Overwrite the default string representation of the task to not print the whole configuration.

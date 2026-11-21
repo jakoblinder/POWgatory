@@ -150,6 +150,9 @@ job_settings:
   container_image: ""               # registry URL (oras://...), local .sif path, or empty for no container
   copy_container_image: true        # copy a local image into the run_dir (false: use it in place)
   presubmit: ""                     # shell command run once before the workflow starts
+  retries: 3                        # resubmissions of a branch whose Slurm job was lost, stuck in COMPLETING, or hung
+  completing_grace: 900             # seconds a job may stay COMPLETING without the branch's outputs
+  hung_start_minutes: 15            # a running job without POWHEG output after this long is hung (0 = never)
 
 stages:
   stage1:
@@ -226,6 +229,22 @@ Job submission is deliberately throttled: `cli.py` monkey-patches b2luigi's `Slu
 
 Use `--workers` to control how many jobs b2luigi keeps submitted/running concurrently (default 250) — this replaced an earlier per-cluster `max_parallel_jobs` setting.
 
+### Stuck, lost and failed jobs
+
+For `submission_type: single` and `array`, b2luigi checks the branches' Slurm jobs once per status poll (every 2 minutes by default) and handles the cases that would otherwise block a stage for hours. These replace the external watchdog script.
+
+| Situation | What happens |
+|---|---|
+| Job hangs in `COMPLETING`, the branch's outputs are complete | The branch counts as done, and the next stage can start. |
+| Job `COMPLETING` for `completing_grace` seconds without the branch's outputs | The branch is resubmitted, at most `retries` times. |
+| Job lost by Slurm (`NODE_FAIL`, `BOOT_FAIL`, `PREEMPTED`) | The branch is resubmitted, at most `retries` times. |
+| Job `RUNNING` for `hung_start_minutes` without POWHEG output in its log | The job is cancelled and the branch resubmitted, at most `retries` times. This is typically a hanging container mount. |
+| POWHEG failed, timed out or ran out of memory | The branch fails and is **not** resubmitted, because it would fail again with the same seed and input. |
+
+When POWHEG exits with an error, POWgatory moves the branch's output files to `incomplete_run_backups/`. POWHEG writes its counters file also when it fails, and the branch would otherwise count as complete. A branch also counts as complete only if its output files are non-empty.
+
+luigi's own retries are switched off. A run with a failed branch finishes everything that does not depend on it and ends with `:(`. After fixing the cause, rerun `powgatory`; it resubmits only the incomplete branches.
+
 ## Container support
 
 If `job_settings.container_image` is set, `POWHEGStage` runs POWHEG inside Apptainer:
@@ -280,6 +299,7 @@ This reflects the current state of the code, so gaps are documented rather than 
 - `stage3.grid_combination`, the `stage3_gridcombine` stage, and the `analysis`/`addweights` stages are all present in the configuration schema but have **no corresponding task implementation** — enabling them has no effect. `powgatory/scrap.py` contains an old, unused draft of this work and is not imported anywhere.
 - `submission_type: array` and `mpi` depend on unreleased `b2luigi` functionality, installed from a fork (see [Requirements](#requirements)).
 - For `submission_type: mpi`, the live `sinfo` data in `POWHEGStage.partition_info` is not yet passed on to b2luigi; b2luigi packs sub-tasks onto nodes using its own `tasks_per_node` setting (default 64), which must match the partition.
+- A job that hangs before POWgatory has moved an earlier attempt's log aside is not detected as hung, because that old log already shows POWHEG output. Such a job sits until its Slurm time limit and its branch fails; `scancel` it and rerun `powgatory`.
 
 ## License
 

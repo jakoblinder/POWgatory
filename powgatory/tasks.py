@@ -571,6 +571,52 @@ class POWHEGStage(POWHEGBaseTask):
 
         return None
 
+    @property
+    def slurm_max_resubmissions(self) -> int:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("slurm_max_resubmissions", <value>) for this task.
+
+        How often b2luigi resubmits this branch after Slurm lost its job (node failure, boot failure,
+        preemption), after its job was stuck in COMPLETING, or after batch_job_is_hung reported it
+        as hung. Other failures are never resubmitted.
+        """
+        return int(self.config["job_settings"]["retries"])
+
+    @property
+    def slurm_completing_grace(self) -> int:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("slurm_completing_grace", <value>) for this task.
+
+        Seconds that a job without this branch's outputs may stay in COMPLETING, before b2luigi
+        resubmits the branch (or the branch counts as failed, when no retries are left).
+        """
+        return int(self.config["job_settings"]["completing_grace"])
+
+    @property
+    def slurm_hung_check_after(self) -> int:
+        """
+        b2luigi setting, i.e. overwrite of b2luigi.set_setting("slurm_hung_check_after", <value>) for this task.
+
+        Seconds after b2luigi first saw a job of this branch running at which it asks
+        batch_job_is_hung, once (0 = never).
+        """
+        return 60 * int(self.config["job_settings"]["hung_start_minutes"])
+
+    def batch_job_is_hung(self) -> bool:
+        """
+        Called by b2luigi once, slurm_hung_check_after seconds after it first saw this branch's job
+        running. The job is hung if POWHEG has written nothing into its log, typically because the
+        container mount hangs: a running POWHEG writes into its log within about a minute.
+        run() moves an earlier attempt's log aside, so a job that hangs before that is not detected.
+        """
+        try:
+            with open(self._powheg_log_file(), errors="replace") as log:
+                head = log.read(4096)
+        except OSError:
+            return True
+        else:
+            return not any(line.strip() and not line.startswith("<Started-POWHEG") for line in head.splitlines())
+
     def _powheg_log_file(self) -> Path:
         """POWHEG's own log of this branch, e.g. <log_dir>/p1-x2-s7.log (not b2luigi's stdout/stderr)."""
         job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)

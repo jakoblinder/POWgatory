@@ -32,6 +32,17 @@ job_settings:
   # For a POWHEGMultiConfigWorkflow this script is run once per config file.
   # It is run in the workflow submission directory (cwd) and not the run_dir.
   presubmit: ""
+  # Stuck and lost Slurm jobs (only for submission_type single and array).
+  # A branch whose job Slurm lost (node failure, boot failure, preemption), whose job is stuck
+  # in COMPLETING (see completing_grace), or whose job is hung (see hung_start_minutes), is
+  # resubmitted at most this many times. A branch where POWHEG ran and failed, timed out or ran
+  # out of memory is never resubmitted.
+  retries: 3
+  # A job that stays COMPLETING this many seconds without the branch's outputs is stuck.
+  completing_grace: 900
+  # A running job whose POWHEG has written nothing into its log after this many minutes is hung,
+  # and is cancelled and resubmitted (0 = never checked).
+  hung_start_minutes: 15
 
 # ============================================================================
 # STAGES TO RUN
