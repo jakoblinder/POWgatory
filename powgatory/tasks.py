@@ -44,7 +44,12 @@ class POWHEGPresubmit(POWHEGBaseTask):
         return self.local_target("presubmit.done")
 
     def run(self):
-        """Execute the presubmit script if defined."""
+        """Set up the container image in the run_dir, then execute the presubmit script if defined."""
+        # Copied or pulled here, once, before any stage runs: the parallel jobs of a stage would
+        # each copy a local image, and a job could start apptainer on another job's half-written
+        # copy. POWHEGStage still calls setup_container, which then finds the image in place.
+        self.setup_container()
+
         presubmit_script = self.config["job_settings"]["presubmit"]
         if presubmit_script:
             self.publish_message(f"Running presubmit script: {presubmit_script}")

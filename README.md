@@ -251,8 +251,8 @@ Only one POWgatory can run per `run_dir`: a second one stops at once with a mess
 
 If `job_settings.container_image` is set, `POWHEGStage` runs POWHEG inside Apptainer:
 
-- A registry reference (anything containing `://`, e.g. `oras://...`) is pulled once into `<run_dir>/powheg.sif`.
-- A local path is copied into `<run_dir>/powheg.sif`. With `job_settings.copy_container_image: false` it is used in place instead, which suits many runs sharing one image (no copy per run directory, and no parallel jobs writing the same copy).
+- A registry reference (anything containing `://`, e.g. `oras://...`) is pulled once into `<run_dir>/powheg.sif`, by `POWHEGPresubmit`, before any stage runs.
+- A local path is copied into `<run_dir>/powheg.sif` once, by `POWHEGPresubmit`, before any stage runs. With `job_settings.copy_container_image: false` it is used in place instead, which suits many runs sharing one image (no copy per run directory).
 - An existing `<run_dir>/powheg.sif` is reused as-is.
 - An empty value runs POWHEG directly, with no container.
 

@@ -216,8 +216,7 @@ class POWHEGBaseTask(Task):
             self.publish_message("No container image specified - will run directly")
             return None
 
-        # Many runs can share one local image: a copy per run directory costs disk space, and
-        # the parallel jobs of a stage would race on writing it.
+        # Many runs can share one local image, instead of a copy per run directory.
         if "://" not in container_image and not self.config['job_settings']['copy_container_image']:
             local_path = Path(container_image).resolve()
             if not local_path.exists():
