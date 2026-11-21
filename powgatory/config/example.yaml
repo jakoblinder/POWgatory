@@ -6,6 +6,8 @@
 # POWHEG files, relative to the directory powgatory is started from
 powheg_executable: "./pwhg_main"
 powheg_input_template: "powheg.input-save"
+lhef_executable: "./lhef_analysis"          # For the stage lhef
+pythia_executable: "./main-PYTHIA82-lhef"   # For the stage pythia
 
 job_settings:
   run_dir: "powheg_output"          # Where POWHEG runs and writes its output
@@ -24,10 +26,21 @@ stages:
       ncall1: 500
   stage2:
     enabled: true
+    # How the seeds' pwg-<seed>-NLO.top (with testplots 1) are merged into pwg-mean-NLO.top:
+    # 1 mean of equal statistics, 2 weighted with 1/error^2, -1 no merge
+    merge_method: 1
   stage3:
     enabled: true
   stage4:
     enabled: true
+  # Analysis of every stage-4 event file in <run_dir>/lhef/ and <run_dir>/pythia/, with the
+  # upper bound weight correction; the histograms are merged per weight
+  lhef:
+    enabled: false
+    merge_method: 1
+  pythia:
+    enabled: false
+    merge_method: 1
 
 # Used by every stage, unless the stage overrides them
 resources:
