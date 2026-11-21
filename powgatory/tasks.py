@@ -25,6 +25,14 @@ from .framework import POWHEGBaseTask, POWHEGWrapperTask
 from .config import POWHEGConfig
 
 
+def seed_strings(seed: int) -> List[str]:
+    """
+    The seed as POWHEG writes it into file names: with four digits, or with five digits in runs
+    with more than 9999 seeds.
+    """
+    return [f"{seed:04d}", f"{seed:05d}"]
+
+
 class POWHEGPresubmit(POWHEGBaseTask):
     """
     Presubmit task to run a user-defined script before the workflow starts.
@@ -527,33 +535,28 @@ class POWHEGStage(POWHEGBaseTask):
                         outputs for the task.
 
         """
+        grid = self.grid_iteration
         if self.stage_number == 1:
             return [
-                [self.local_target(f"pwg-xg{self.grid_iteration}-xgrid-btl-{self.branch_id:04d}.dat"),
-                 self.local_target(f"pwg-{self.branch_id:04d}-xg{self.grid_iteration}-stat.dat"),],
-                #
-                [self.local_target(f"pwggridinfo-btl-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),
-                 self.local_target(f"pwggridinfo-rmn-xg{self.grid_iteration}-{self.branch_id:04d}.dat"),],
-                # Same files with a 5-digit seed suffix (more than 9999 seeds).
-                [self.local_target(f"pwg-xg{self.grid_iteration}-xgrid-btl-{self.branch_id:05d}.dat"),
-                 self.local_target(f"pwg-{self.branch_id:05d}-xg{self.grid_iteration}-stat.dat"),],
-                #
-                [self.local_target(f"pwggridinfo-btl-xg{self.grid_iteration}-{self.branch_id:05d}.dat"),
-                 self.local_target(f"pwggridinfo-rmn-xg{self.grid_iteration}-{self.branch_id:05d}.dat"),],
+                target_set
+                for seed in seed_strings(self.branch_id)
+                for target_set in (
+                    [self.local_target(f"pwg-xg{grid}-xgrid-btl-{seed}.dat"),
+                     self.local_target(f"pwg-{seed}-xg{grid}-stat.dat"),],
+                    [self.local_target(f"pwggridinfo-btl-xg{grid}-{seed}.dat"),
+                     self.local_target(f"pwggridinfo-rmn-xg{grid}-{seed}.dat"),],
+                )
             ]
         elif self.stage_number == 4:
             return [
-                [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),
-                 self.local_target(f"pwgevents-{self.branch_id:04d}.lhe"),],
-                # Same files with a 5-digit seed suffix (more than 9999 seeds).
-                [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:05d}.dat"),
-                 self.local_target(f"pwgevents-{self.branch_id:05d}.lhe"),],
+                [self.local_target(f"pwgcounters-st{self.stage_number}-{seed}.dat"),
+                 self.local_target(f"pwgevents-{seed}.lhe"),]
+                for seed in seed_strings(self.branch_id)
             ]
         else:
             return [
-                [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:04d}.dat"),],
-                # Same files with a 5-digit seed suffix (more than 9999 seeds).
-                [self.local_target(f"pwgcounters-st{self.stage_number}-{self.branch_id:05d}.dat"),],
+                [self.local_target(f"pwgcounters-st{self.stage_number}-{seed}.dat"),]
+                for seed in seed_strings(self.branch_id)
             ]
 
     def complete(self):
