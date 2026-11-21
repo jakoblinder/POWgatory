@@ -24,6 +24,7 @@ import yaml
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapperTask
 from .config import POWHEGConfig, ANALYSIS_STAGES
+from .merge import METHOD_NAMES, merge_histograms
 from .ub_correction import correction_factors
 
 
@@ -941,16 +942,43 @@ class POWHEGStageTimings(POWHEGBaseTask):
 
 
 ##########################################################
+# Histogram files of stage 2 and of the analysis stages #
+##########################################################
+# Name patterns of a stage's histogram files, without ".top"; {seed} is the seed with four or
+# five digits, and with several event weights pwhgtopout appends -W1, -W2, ... The names depend
+# on the process's programs (pwhg_analysis, lhef_analysis.f, main-PYTHIA8.f), so a stage has a
+# list of them: an analysis branch is complete when the file of any of them is there, and the
+# merge uses the first one of which seed 1 has a file. "pwg" is the run prefix, for the analyses
+# the part of the event file name pwgevents-<seed>.lhe before "events".
+HISTOGRAM_NAMES = {
+    "stage2": ["pwg-{seed}-NLO"],
+    "lhef":   ["pwgLHEF_analysis-{seed}"],
+    "pythia": ["pwgoutput_py8_histos-{seed}", "pwgevents-{seed}.lheoutput_py8_histos"],
+}
+
+
+def histogram_weights(directory: Path, name: str) -> List[str]:
+    """
+    The weight suffixes of the histogram files <name>[-W<n>].top in directory: "-W1", "-W2", ...
+    with several weights, [""] for a single file <name>.top, and [] if there is none.
+    """
+    prefix  = f"{name}-W"
+    weights = sorted(
+        int(path.stem.removeprefix(prefix))
+        for path in directory.glob(f"{prefix}*.top")
+        if path.stem.removeprefix(prefix).isdigit()
+    )
+    if weights:
+        return [f"-W{weight}" for weight in weights]
+    elif (directory / f"{name}.top").exists():
+        return [""]
+    else:
+        return []
+
+
+##########################################################
 # Analysis stages (lhef, pythia) of the stage-4 events #
 ##########################################################
-# Names of the histogram file the program of an analysis stage writes, without seed and ".top";
-# a branch is complete when the file of any of them is there. "pwg" is the part of the event file
-# name pwgevents-<seed>.lhe before "events", then comes the name in the program's source
-# (lhef_analysis.f, main-PYTHIA8.f), which can differ between processes.
-ANALYSIS_OUTPUT_NAMES = {
-    "lhef":   ["pwgLHEF_analysis"],
-    "pythia": ["pwgoutput_py8_histos"],
-}
 
 
 def stage4_seeds(config) -> range:
@@ -1095,15 +1123,15 @@ class POWHEGAnalysis(POWHEGStage):
 
     def output(self):
         """
-        The histogram file the stage's program writes for this seed, for every name in
-        ANALYSIS_OUTPUT_NAMES and the seed in four or in five digits. With several event weights
+        The histogram file the stage's program writes for this seed, for every name pattern in
+        HISTOGRAM_NAMES and the seed in four or in five digits. With several event weights
         (rwl_num_weights > 1), pwhgtopout writes one file per weight instead, <name>-W1.top,
         -W2.top, ..., in this order; -W1 stands for all of them, since their number is only known
         from the event file.
         """
         return [
-            [self.local_target(self.stage, f"{name}-{seed}{weight}.top")]
-            for name in ANALYSIS_OUTPUT_NAMES[self.stage]
+            [self.local_target(self.stage, f"{pattern.format(seed=seed)}{weight}.top")]
+            for pattern in HISTOGRAM_NAMES[self.stage]
             for seed in seed_strings(self.branch_id)
             for weight in ("", "-W1")
         ]
@@ -1128,6 +1156,109 @@ class POWHEGAnalysis(POWHEGStage):
                           event_file      = event_file.name)
 
         self._wait_for_stage_output()
+
+
+class POWHEGMerge(POWHEGStage):
+    """
+    Merge of the histogram files of a stage (stage2, lhef or pythia) over all its seeds, one merged
+    file per weight, with the stage's merge_method (see merge.py): e.g. pwg-mean-NLO.top or
+    lhef/pwgLHEF_analysis-mean-W1.top. One branch with the stage's resources, so a Slurm job, or a
+    local process with batch_system local.
+    """
+
+    @property
+    def job_name(self) -> str:
+        return f"{self.config['job_settings']['job_name']}_{self.stage}_merge"
+
+    def get_log_file_dir(self):
+        """b2luigi's stdout and stderr of the merge, in <log_dir>/<stage>-merge/."""
+        return f"{POWHEGBaseTask.get_log_file_dir(self)}/{self.stage}-merge"
+
+    def batch_job_is_hung(self) -> bool:
+        """
+        The merge never counts as hung. It has to override the method it inherits from
+        POWHEGStage, which b2luigi would otherwise call: that one reads the POWHEG log of the
+        stage's seed 1, which says nothing about the merge.
+        """
+        return False
+
+    def requires(self):
+        yield POWHEGStageTimings(stage=self.stage, version=self.version, config=self.config)
+
+    def output(self):
+        pattern, weights = self._pattern_and_weights()
+        return [[b2luigi.LocalTarget(str(self._merged_file(pattern, weight)))] for weight in weights]
+
+    def complete(self):
+        """
+        Not before the stage's timings task is complete; then when every merged file exists and is
+        non-empty, or when there is nothing to merge (stage 2 writes its NLO files only with
+        testplots 1).
+        """
+        if not POWHEGStageTimings(stage=self.stage, version=self.version, config=self.config).complete():
+            return False
+        else:
+            pattern, weights = self._pattern_and_weights()
+            return all(
+                self._merged_file(pattern, weight).exists() and self._merged_file(pattern, weight).stat().st_size > 0
+                for weight in weights
+            )
+
+    def run(self):
+        """Merge the histogram files of all seeds, one merged file per weight."""
+        method = int(self.config["stages"][self.stage]["merge_method"])
+        pattern, weights = self._pattern_and_weights()
+
+        if pattern is None:
+            # E.g. stage 2 writes its NLO histograms only with testplots 1.
+            self.publish_message(f"No histogram files of {self.stage} to merge: seed 1 has none of {HISTOGRAM_NAMES[self.stage]}[-W<n>].top.")
+        else:
+            for weight in weights:
+                input_files, missing_seeds = [], []
+                for seed in self._seeds():
+                    histogram_file = seed_file(self._histogram_dir(), f"{pattern}{weight}.top", seed)
+                    if histogram_file.exists():
+                        input_files.append(histogram_file)
+                    else:
+                        missing_seeds.append(seed)
+
+                if missing_seeds:
+                    self.publish_message(f"WARNING: {len(missing_seeds)} seeds have no {pattern}{weight}.top and are left out: {missing_seeds[:20]}")
+
+                merged_file = self._merged_file(pattern, weight)
+                self.publish_message(f"Merging {len(input_files)} files into {merged_file} with method {method} ({METHOD_NAMES[method]})")
+                merge_histograms(input_files, method, merged_file)
+
+    def _histogram_dir(self) -> Path:
+        run_dir = Path(self.config["job_settings"]["run_dir"])
+        if self.stage in ANALYSIS_STAGES:
+            return run_dir / self.stage
+        else:
+            return run_dir
+
+    def _seeds(self) -> range:
+        if self.stage in ANALYSIS_STAGES:
+            return stage4_seeds(self.config)
+        else:
+            return range(1, self.config["stages"][self.stage]["resources"]["ntasks"] + 1)
+
+    def _pattern_and_weights(self):
+        """
+        The first name pattern of the stage in HISTOGRAM_NAMES of which seed 1 has a histogram
+        file (a run keeps one naming convention), and the weight suffixes of seed 1's files; or
+        (None, []) if seed 1 has none.
+        """
+        for pattern in HISTOGRAM_NAMES[self.stage]:
+            for seed_string in seed_strings(self._seeds()[0]):
+                weights = histogram_weights(self._histogram_dir(), pattern.format(seed=seed_string))
+                if weights:
+                    return pattern, weights
+        return None, []
+
+    def _merged_file(self, pattern: str, weight: str) -> Path:
+        """The merged file of a weight: the pattern with the method's name in place of the seed."""
+        method_name = METHOD_NAMES[int(self.config["stages"][self.stage]["merge_method"])]
+        return self._histogram_dir() / f"{pattern.format(seed=method_name)}{weight}.top"
 
 
 class POWHEGStageWrapper(POWHEGWrapperTask):
@@ -1191,9 +1322,11 @@ class POWHEGWorkflow(POWHEGWrapperTask):
         else:
             yield POWHEGStageTimings(stage=self.get_stage_str(highest_stage), version=self.version, config=self.config)
 
-        for analysis_stage in ANALYSIS_STAGES:
-            if stages_config[analysis_stage]['enabled']:
-                yield POWHEGStageTimings(stage=analysis_stage, version=self.version, config=self.config)
+        # The merges of the histogram files; the one of stage 2 runs while stage 3 runs, since
+        # stage 3 requires stage 2's timings task, not the merge.
+        merged_stages = [stage for stage in ("stage2",) + ANALYSIS_STAGES if stages_config[stage]['enabled']]
+        for stage in merged_stages:
+            yield POWHEGMerge(stage=stage, grid_iteration=-1, branch_id=1, version=self.version, config=self.config)
 
 
 class POWHEGMultiConfigWorkflow(POWHEGWrapperTask):

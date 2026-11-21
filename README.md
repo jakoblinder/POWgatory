@@ -12,6 +12,7 @@ This document is the single reference for installing, configuring, and running P
 - [Quick start](#quick-start)
 - [Pipeline architecture](#pipeline-architecture)
 - [Analysis stages](#analysis-stages)
+- [Merging histograms](#merging-histograms)
 - [Configuration reference](#configuration-reference)
 - [Batch submission details](#batch-submission-details)
 - [Container support](#container-support)
@@ -129,7 +130,7 @@ POWHEGStage1(grid=1) → POWHEGStage1(grid=2) → POWHEGStage1(grid=3)
                                                POWHEGStage4
 ```
 
-The analysis stages `lhef` and `pythia` (see [Analysis stages](#analysis-stages)) both wait for stage 4, and `POWHEGWorkflow` also requires their `POWHEGStageTimings` when they are enabled.
+The analysis stages `lhef` and `pythia` (see [Analysis stages](#analysis-stages)) both wait for stage 4. At the end, the histogram files of stage 2, `lhef` and `pythia` are merged over all seeds (see [Merging histograms](#merging-histograms)); `POWHEGWorkflow` requires these merges for every enabled stage among them.
 
 `POWHEGMultiConfigWorkflow` lets a single CLI invocation submit several independent `run.yaml`s at once.
 
@@ -146,7 +147,7 @@ POWHEGStageTimings(stage4) → POWHEGWeightCorrection → POWHEGAnalysisSetup(lh
 
 - **`POWHEGWeightCorrection`** runs once, locally, if a stage has `weight_correction: true`. For every seed it computes the upper bound correction factors `ub_btilde_corr` and `ub_remn_corr` from that seed's `pwgcounters-st4-<seed>.dat`, and writes them into `<run_dir>/ub_corrections.yaml`. A factor is the cross section estimated during the event generation divided by the one used for it and by the bound violation correction factor. It exists only for an event type whose weights were corrected for upper bound violations, i.e. whose bound violation correction factor is not 1; without such corrections, the estimate differs from the cross section used only by its statistical error. This is the logic of POWHEG-BOX's `FindReweightFromCounters.py`, which is also available as `python -m powgatory.ub_correction pwgcounters-st4-*.dat`. The counters contain these numbers only with `ubexcess_correct 1` in the POWHEG input.
 - **`POWHEGAnalysisSetup`** writes `<seed>-powheg.input` per seed: the template with the stage's `powheg_parameters`, like the input files of stages 1-4, plus the seed's correction factors if the stage has `weight_correction: true`. It links the event files in (`pwgevents-0001.lhe -> ../pwgevents-0001.lhe`), and the stage's `link_files`, for programs that need further files.
-- **`POWHEGAnalysis`** runs the program with the seed and then the event file on stdin (`scripts/run_program.sh`). Without a `powheg.input` in their directory, the POWHEG programs take the first line as prefix of their input file, read `<seed>-powheg.input`, and multiply the event weights by the factors in it. A branch is complete when its histogram file exists and is non-empty: `pwgLHEF_analysis-<seed>.top` or `pwgoutput_py8_histos-<seed>.top`, the names in `lhef_analysis.f` and `main-PYTHIA8.f`. With several event weights (e.g. scale variations via `rwl_file`), the programs write one file per weight instead, `...-<seed>-W1.top`, `...-W2.top`, ..., and `-W1` is checked. A program that names its histograms differently needs its name in `ANALYSIS_OUTPUT_NAMES` in `powgatory/tasks.py`, a list per stage; any of the names counts.
+- **`POWHEGAnalysis`** runs the program with the seed and then the event file on stdin (`scripts/run_program.sh`). Without a `powheg.input` in their directory, the POWHEG programs take the first line as prefix of their input file, read `<seed>-powheg.input`, and multiply the event weights by the factors in it. A branch is complete when its histogram file exists and is non-empty: `pwgLHEF_analysis-<seed>.top` or `pwgoutput_py8_histos-<seed>.top`, the names in `lhef_analysis.f` and `main-PYTHIA8.f`. With several event weights (e.g. scale variations via `rwl_file`), the programs write one file per weight instead, `...-<seed>-W1.top`, `...-W2.top`, ..., and `-W1` is checked. A program that names its histograms differently needs its name pattern in `HISTOGRAM_NAMES` in `powgatory/tasks.py`, a list per stage; any of the names counts.
 
 ```yaml
 lhef_executable: "./lhef_analysis"
@@ -162,6 +163,40 @@ stages:
     resources:
       time: "48:00:00"
 ```
+
+## Merging histograms
+
+At the end of a run, POWgatory merges the histogram files (`.top`) of all seeds, one merged file per weight, with the stage's `merge_method`:
+
+| Stage | Files | Merged file |
+|---|---|---|
+| `stage2` | `pwg-<seed>-NLO.top` (only with `testplots 1` in the POWHEG input) | `pwg-mean-NLO.top` |
+| `lhef` | `lhef/pwgLHEF_analysis-<seed>[-W<n>].top` | `lhef/pwgLHEF_analysis-mean[-W<n>].top` |
+| `pythia` | `pythia/pwgoutput_py8_histos-<seed>[-W<n>].top` | `pythia/pwgoutput_py8_histos-mean[-W<n>].top` |
+
+The merged file has the method's name in place of the seed. The file names come from `HISTOGRAM_NAMES` in `powgatory/tasks.py`, a list of name patterns per stage (e.g. also `pwgevents-<seed>.lheoutput_py8_histos` for PYTHIA); the merge uses the first one of which seed 1 has a file, and finds the weights from seed 1's files. Seeds without a file are left out with a warning. Without any file (e.g. stage 2 without `testplots 1`) there is nothing to merge, and the run still ends successfully.
+
+Each merge (`POWHEGMerge`) is one job with its stage's `resources`, a Slurm job or, with `batch_system: local`, a local process. The merge of stage 2 runs while stage 3 runs.
+
+`merge_method` (per stage, default 1):
+
+| Method | Combination |
+|---|---|
+| 1 `mean` | Mean of sets with equal statistics; errors added in quadrature and divided by the number of files |
+| 2 `uneven` | Mean weighted with 1/error², for sets with different statistics |
+| 3 `sum` | Sum (e.g. born + virtual + real) |
+| 4 `max`, 5 `min` | Maximum or minimum, with its error |
+| 6 `sum-last` | Sum of all but the last set, minus the last set |
+
+The merge is `powgatory/merge.py`, the logic of `mergedata` (POWHEG's Fortran program and its C++ rewrite) with numpy: it reads one file at a time, so memory grows with the lines of one file, not with the number of files, and it writes the same output as `mergedata`, numbers in Fortran D notation (`0.12345678D+00`). It can also be used by hand:
+
+```bash
+python -m powgatory.merge 1 pwgLHEF_analysis-*-W1.top             # → pwgLHEF_analysis-mean-W1.top
+python -m powgatory.merge 2 files... -out merged.top -modern       # error-weighted, E notation
+```
+
+All files must have the same layout (the same number of lines and the same bin edges); data lines are lines with four numbers, all other lines are taken from the first file.
+
 ## Configuration reference
 
 `run.yaml` is merged against `powgatory/config/config_default.yaml`, which ships only the minimal set of keys needed to run and is reproduced below as the schema reference. `powgatory/config/example.yaml` holds only the settings most runs change, including a per-stage `resources`/`powheg_parameters` override, and is what `powgatory --init` writes when you have no template of your own (see [Quick start](#quick-start)).
@@ -193,6 +228,7 @@ stages:
     grid_iterations: 3
   stage2:
     enabled: true
+    merge_method: 1                 # see Merging histograms
   stage3:
     enabled: true
   stage4:
@@ -201,10 +237,12 @@ stages:
     enabled: false
     weight_correction: true
     link_files: []
+    merge_method: 1
   pythia:
     enabled: false
     weight_correction: true
     link_files: []
+    merge_method: 1
 
 resources:                          # applies to every stage unless overridden per stage (see below)
   batch_system: slurm                # "local" (GNU-parallel-style subprocess execution) or "slurm"
@@ -329,7 +367,8 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 - `incomplete_run_backups/` — output files quarantined from a previous failed or killed attempt, or from a POWHEG run that exited with an error.
 - `.powgatory.lock` — held by the running POWgatory, so that a second one on the same `run_dir` stops.
 - `ub_corrections.yaml` — the upper bound correction factors of every stage-4 seed, if an analysis stage has `weight_correction: true`.
-- `lhef/`, `pythia/` — the analysis stages' `<seed>-powheg.input` files, links to the event files and `link_files`, and the programs' outputs.
+- `lhef/`, `pythia/` — the analysis stages' `<seed>-powheg.input` files, links to the event files and `link_files`, the programs' outputs, and the merged histograms.
+- `pwg-mean-NLO.top` — the merged NLO histograms of stage 2 (see [Merging histograms](#merging-histograms)).
 - POWHEG's own output files (`pwg*.dat`, `pwgevents-*.lhe`, ...) and the `powheg.input`/`pwgseeds.dat` symlinks, written directly into the run directory.
 
 ## Troubleshooting

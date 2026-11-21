@@ -9,6 +9,8 @@ import sys
 import subprocess
 from typing import Dict, Any, Optional
 
+from .merge import METHOD_NAMES
+
 # Stages that analyse the stage-4 event files, each with its own <stage>_executable.
 ANALYSIS_STAGES = ("lhef", "pythia")
 
@@ -340,6 +342,12 @@ class POWHEGConfig:
             executable = self[f'{analysis_stage}_executable']
             if self['stages'][analysis_stage]['enabled'] and not executable.exists():
                 raise FileNotFoundError(f"ERROR: Executable of stage {analysis_stage} not found: {executable}")
+
+        # Check the merge methods of the stages whose histogram files are merged
+        for merged_stage in ("stage2",) + ANALYSIS_STAGES:
+            merge_method = self['stages'][merged_stage]['merge_method']
+            if merge_method not in METHOD_NAMES:
+                raise ValueError(f"ERROR: Stage {merged_stage} has merge_method {merge_method}, expected one of {sorted(METHOD_NAMES)}.")
 
     # Dict-like interface delegation to self.config
     def __getitem__(self, key):
