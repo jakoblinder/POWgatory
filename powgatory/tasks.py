@@ -552,14 +552,24 @@ class POWHEGStage(POWHEGBaseTask):
             ]
 
     def complete(self):
-        """Treat stage as complete when one of the possible sets of output targets exists."""
-        output = self.output()
+        """
+        Treat stage as complete when the files of one of the possible sets of output targets exist
+        and are non-empty, the same test _wait_for_stage_output applies after POWHEG ran.
+        """
+        return self._complete_output_set() is not None
 
-        for target_set in output:
-            if all(target.exists() for target in target_set):
-                return True
+    def _complete_output_set(self):
+        """Return the first set of output targets whose files all exist and are non-empty, or None."""
+        for target_set in self.output():
+            try:
+                sizes = [os.path.getsize(target.path) for target in target_set]
+            except OSError:
+                continue
 
-        return False
+            if all(size > 0 for size in sizes):
+                return target_set
+
+        return None
 
     def run(self):
         """Execute POWHEG for this branch and wait until its output files are written."""
@@ -588,15 +598,10 @@ class POWHEGStage(POWHEGBaseTask):
         is required, not just existence.
         """
         for _ in range(retries):
-            for target_set in self.output():
-                try:
-                    sizes = [os.path.getsize(target.path) for target in target_set]
-                except OSError:
-                    continue
-
-                if all(size > 0 for size in sizes):
-                    self.publish_message(f"Output files ready: {[target.path for target in target_set]}")
-                    return
+            target_set = self._complete_output_set()
+            if target_set is not None:
+                self.publish_message(f"Output files ready: {[target.path for target in target_set]}")
+                return
 
             self.publish_message("Expected output files not created yet. Retrying...")
             time.sleep(delay)
