@@ -260,7 +260,7 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 - `task_files/` — b2luigi's generated submission scripts.
 - `logs/<job_code>/` — POWHEG stdout/stderr per branch, bracketed with `<Started-POWHEG:...>`/`<Finished-POWHEG:...>` markers that `POWHEGStageTimings` parses.
 - `timings.yaml` — per-stage timing statistics (shortest/longest/average/total), updated as each stage completes.
-- `incomplete_run_backups/` — output files quarantined from a previous failed or killed attempt.
+- `incomplete_run_backups/` — output files quarantined from a previous failed or killed attempt, or from a POWHEG run that exited with an error.
 - POWHEG's own output files (`pwg*.dat`, `pwgevents-*.lhe`, ...) and the `powheg.input`/`pwgseeds.dat` symlinks, written directly into the run directory.
 
 ## Troubleshooting

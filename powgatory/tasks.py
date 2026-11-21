@@ -571,6 +571,11 @@ class POWHEGStage(POWHEGBaseTask):
 
         return None
 
+    def _powheg_log_file(self) -> Path:
+        """POWHEG's own log of this branch, e.g. <log_dir>/p1-x2-s7.log (not b2luigi's stdout/stderr)."""
+        job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)
+        return Path(super().get_log_file_dir()).resolve() / f"{job_code}.log"
+
     def run(self):
         """Execute POWHEG for this branch and wait until its output files are written."""
         self._quarantine_stale_outputs()
@@ -618,27 +623,33 @@ class POWHEGStage(POWHEGBaseTask):
         (partial) file with the same name already exists, and so we keep a
         record of what happened in the failed attempt.
         """
-        run_dir = Path(self.config['job_settings']['run_dir'])
-        backup_root = run_dir / "incomplete_run_backups"
+        # Also grab the log file from the previous attempt, so we don't lose it.
+        return self._move_to_backup(self._output_paths() | {self._powheg_log_file()})
 
-        # Collect every filename that any of the possible output-target sets for
-        # this stage/branch could refer to.
+    def _output_paths(self) -> set:
+        """
+        Every file that any of the possible output-target sets of this branch refers to.
+
+        For stage 4 this includes the event file pwgevents-????.lhe. It has to be moved
+        away before POWHEG runs this branch again, because POWHEG refuses to run if the
+        event file already exists, even if it is left over from an incomplete run.
+        """
         candidate_paths = set()
         for target_set in self.output():
             for target in target_set:
                 candidate_paths.add(Path(target.path))
 
-        # Stage 4's event file is the known culprit: POWHEG refuses to run if it
-        # already exists, even if the run was previously incomplete.
-        move_incomplete_event_files = True # FIXME: Make this configurable in the config file.
-        if self.stage_number == 4 and move_incomplete_event_files:
-            candidate_paths.add(run_dir / f"pwgevents-{self.branch_id:04d}.lhe")
+        return candidate_paths
 
-        # Also grab the log file from the previous attempt, so we don't lose it.
-        job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)
-        log_dir  = Path(super().get_log_file_dir()).resolve()
-        log_file = log_dir / f"{job_code}.log"
-        candidate_paths.add(log_file)
+    def _move_to_backup(self, candidate_paths: set) -> bool:
+        """
+        Move those of candidate_paths that exist into a new directory in incomplete_run_backups/.
+
+        Returns:
+            True if any file was moved.
+        """
+        run_dir = Path(self.config['job_settings']['run_dir'])
+        backup_root = run_dir / "incomplete_run_backups"
 
         backup_dir = None
         def _get_backup_dir():
@@ -670,8 +681,7 @@ class POWHEGStage(POWHEGBaseTask):
 
         pwhg_main = self.config['powheg_executable']
 
-        log_dir = Path(super().get_log_file_dir()).resolve()
-        log_file = log_dir / f"{job_code}.log"
+        log_file = self._powheg_log_file()
 
         def call_job_script(script, job_code, task_id, program, log_file=""):
             """
@@ -699,6 +709,9 @@ class POWHEGStage(POWHEGBaseTask):
                 check=True,
             )
         except subprocess.CalledProcessError as e:
+            # POWHEG's pwhg_exit writes the counters file also when POWHEG fails, so the branch
+            # would count as complete. The log stays in place; the next attempt moves it.
+            self._move_to_backup(self._output_paths())
             raise RuntimeError(f"POWHEG failed: {e}")
         finally:
             with open(log_file, 'a') as logf:
