@@ -25,6 +25,9 @@ job_settings:
   #   - Local path: "/path/to/powheg.sif" or "./powheg.sif"
   #   - Empty/omit: run directly without container
   container_image: "oras://gitlab-registry.mpcdf.mpg.de/mpp/containers/jlinder/powheg:powheg-latest"
+  # For a local container_image: true copies it to <run_dir>/powheg.sif, false uses it in place
+  # (e.g. one image shared by many runs). A registry URL is always pulled into the run_dir.
+  copy_container_image: true
   # Script to be run before POWHEGWorkflow is started.
   # For a POWHEGMultiConfigWorkflow this script is run once per config file.
   # It is run in the workflow submission directory (cwd) and not the run_dir.

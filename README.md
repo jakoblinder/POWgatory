@@ -148,6 +148,7 @@ job_settings:
   log_dir: "powheg_output/logs"     # where job logs are written
   exclude_nodes: ""                 # comma-separated list of nodes to exclude
   container_image: ""               # registry URL (oras://...), local .sif path, or empty for no container
+  copy_container_image: true        # copy a local image into the run_dir (false: use it in place)
   presubmit: ""                     # shell command run once before the workflow starts
 
 stages:
@@ -208,7 +209,7 @@ stages:
 Further notes:
 
 - `batch_system: local` ignores `partition` and runs each branch as a local subprocess instead of submitting to Slurm (useful for testing without cluster access).
-- `container_image` accepts a registry URL (pulled once into `<run_dir>/powheg.sif` via `apptainer pull`), a local file path (copied into the run directory), or an empty string to run without a container.
+- `container_image` accepts a registry URL (pulled once into `<run_dir>/powheg.sif` via `apptainer pull`), a local file path (copied into the run directory, or used in place with `copy_container_image: false`), or an empty string to run without a container.
 - The config file also defines `stage3.grid_combination`, a `stage3_gridcombine` stage, and `analysis`/`addweights` stages. **These are configuration placeholders only** — see [Known limitations](#known-limitations).
 
 ## Batch submission details
@@ -230,7 +231,7 @@ Use `--workers` to control how many jobs b2luigi keeps submitted/running concurr
 If `job_settings.container_image` is set, `POWHEGStage` runs POWHEG inside Apptainer:
 
 - A registry reference (anything containing `://`, e.g. `oras://...`) is pulled once into `<run_dir>/powheg.sif`.
-- A local path is copied into `<run_dir>/powheg.sif`.
+- A local path is copied into `<run_dir>/powheg.sif`. With `job_settings.copy_container_image: false` it is used in place instead, which suits many runs sharing one image (no copy per run directory, and no parallel jobs writing the same copy).
 - An existing `<run_dir>/powheg.sif` is reused as-is.
 - An empty value runs POWHEG directly, with no container.
 

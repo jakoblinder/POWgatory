@@ -192,11 +192,12 @@ class POWHEGBaseTask(Task):
         """
         Setup container image if needed.
         - If container_image is empty: run without container
-        - If container_image is a local path: copy to powheg.sif
+        - If container_image is a local path: copy to powheg.sif,
+          or use it in place if job_settings.copy_container_image is false
         - If container_image is a registry URL: pull to powheg.sif
 
         Returns:
-            Path to the container image (powheg.sif) if used, else None.
+            Path to the container image (powheg.sif, or the local image used in place) if used, else None.
         """
         container_image = self.config['job_settings']['container_image']
         sif_path = Path(self.config['job_settings']['run_dir']) / 'powheg.sif'
@@ -204,6 +205,15 @@ class POWHEGBaseTask(Task):
         if not container_image:
             self.publish_message("No container image specified - will run directly")
             return None
+
+        # Many runs can share one local image: a copy per run directory costs disk space, and
+        # the parallel jobs of a stage would race on writing it.
+        if "://" not in container_image and not self.config['job_settings']['copy_container_image']:
+            local_path = Path(container_image).resolve()
+            if not local_path.exists():
+                raise FileNotFoundError(f"Local container image not found: {local_path}")
+            self.publish_message(f"Using local container in place: {local_path}")
+            return local_path
 
         if sif_path.exists():
             self.publish_message(f"Container already exists at {sif_path}")
