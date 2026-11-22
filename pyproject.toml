@@ -31,6 +31,7 @@ dependencies = [
     # Workflow orchestration. Pinned to a commit after v3.8.1 because no luigi release supports
     # Python 3.14 yet (support was added in spotify/luigi#3433). Go back to a release once one does.
     "luigi @ git+https://github.com/spotify/luigi.git@f5feb7a4655ad73ef56f0ab04d7903ab43b63e12",
+    "numpy>=1.23",      # Histogram merging (merge.py)
     "pyyaml>=5.4",      # YAML configuration
 ]
 
