@@ -4,6 +4,8 @@ POWHEG-BOX b2luigi workflow configuration manager
 
 """
 from pathlib import Path
+import functools
+import shutil
 import yaml
 import sys
 import subprocess
@@ -17,6 +19,33 @@ ANALYSIS_STAGES = ("lhef", "pythia")
 
 # merge_method of a stage whose histogram files are not merged.
 NO_MERGE = -1
+
+# The Slurm queries below are cached, so that a POWgatory with many configs sends each of them
+# once: the Slurm controller limits the requests per user (rl_enable in SlurmctldParameters), and
+# hundreds of them in a row make the commands fail.
+
+
+@functools.cache
+def sinfo_partition_table() -> str:
+    """The output of sinfo with the nodes, CPUs, memory and time limit of every partition."""
+    return subprocess.check_output(["sinfo", "--noheader", "-o", "%P %D %c %z %m %l"]).decode()
+
+
+@functools.cache
+def slurm_max_array_size() -> int:
+    """
+    Slurm's MaxArraySize from `scontrol show config`, or 1 where there is no Slurm (local branches
+    are never grouped). Job array indices run from 0 to MaxArraySize - 1, and b2luigi numbers the
+    elements from 0, so a job array can have MaxArraySize elements.
+    """
+    if shutil.which("scontrol") is None:
+        return 1
+    else:
+        output   = subprocess.check_output(["scontrol", "show", "config"]).decode()
+        settings = {key.strip(): value.strip() for key, _, value in (line.partition("=") for line in output.splitlines())}
+        max_array_size = int(settings["MaxArraySize"])
+        print(f"max_grouping_size: auto -> {max_array_size} (Slurm's MaxArraySize)")
+        return max_array_size
 
 
 class POWHEGConfig:
@@ -108,8 +137,6 @@ class POWHEGConfig:
             # Query available partition info from sinfo (hardcoded for now; to be made configurable later)
             self.get_partition_info()
 
-        self.resolve_max_grouping_size(requires_slurm)
-
         exclude_nodes = self["job_settings"]["exclude_nodes"] or []
         if isinstance(exclude_nodes, str):
             exclude_nodes = [node.strip() for node in exclude_nodes.split(",")]
@@ -164,7 +191,7 @@ class POWHEGConfig:
         # TODO: Make this configurable (e.g. skip the query if the config file already
         # provides this info, or let it be overridden from there).
         """
-        output = subprocess.check_output(["sinfo", "--noheader", "-o", "%P %D %c %z %m %l"]).decode()
+        output = sinfo_partition_table()
 
         partition_info: Dict[str, Dict[str, Any]] = {}
         for line in output.strip().splitlines():
@@ -179,53 +206,6 @@ class POWHEGConfig:
             entry["nodes"] += int(nodes)  # sinfo lists one row per node state within a partition
 
         self["cluster_config"]["slurm"] = partition_info
-
-    @staticmethod
-    def get_max_array_size() -> int:
-        """
-        Slurm's MaxArraySize, from `scontrol show config`. Job array indices run from 0 to
-        MaxArraySize - 1, and b2luigi numbers the elements from 0, so a job array can have
-        MaxArraySize elements.
-        """
-        output = subprocess.check_output(["scontrol", "show", "config"]).decode()
-        for line in output.splitlines():
-            key, _, value = line.partition("=")
-            if key.strip() == "MaxArraySize":
-                return int(value)
-        raise RuntimeError("ERROR: scontrol show config does not report MaxArraySize.")
-
-    def resolve_max_grouping_size(self, requires_slurm: bool) -> None:
-        """
-        Replace max_grouping_size: auto, in the top-level resources and in every stage, by Slurm's
-        MaxArraySize. Every auto gets the same value: luigi takes the group size of all POWHEGStage
-        tasks (stages 1-4 and stage3_fullgrid) from the first one it adds, which may be a local stage.
-        The value is read from Slurm again in every batch job, so the config and task IDs stay the same.
-        """
-        resources_blocks = [self["resources"]] + [stage_config["resources"] for stage_config in self["stages"].values()]
-        auto_blocks      = [resources for resources in resources_blocks if resources["max_grouping_size"] == "auto"]
-
-        # An MPI job runs all seeds of its group at the same time, so its size has to be chosen.
-        mpi_stages = [
-            stage_name for stage_name, stage_config in self["stages"].items()
-            if stage_config["enabled"]
-            and stage_config["resources"]["batch_system"] == "slurm"
-            and stage_config["resources"]["submission_type"] == "mpi"
-            and stage_config["resources"]["max_grouping_size"] == "auto"
-        ]
-        if mpi_stages:
-            raise ValueError(
-                f"ERROR: Stage {', '.join(mpi_stages)} has submission_type mpi and max_grouping_size auto, which "
-                f"would put up to Slurm's MaxArraySize seeds into one MPI job. Set max_grouping_size to a number."
-            )
-        elif auto_blocks and requires_slurm:
-            max_grouping_size = self.get_max_array_size()
-            print(f"max_grouping_size: auto -> {max_grouping_size} (Slurm's MaxArraySize)")
-        else:
-            # Local branches are never grouped, so a fully local run needs no Slurm query.
-            max_grouping_size = 1
-
-        for resources in auto_blocks:
-            resources["max_grouping_size"] = max_grouping_size
 
     @staticmethod
     def _parse_slurm_time(time_str: str) -> Optional[int]:
@@ -376,6 +356,21 @@ class POWHEGConfig:
         local_parallel_tasks = self['job_settings']['local_parallel_tasks']
         if local_parallel_tasks != "auto" and (not isinstance(local_parallel_tasks, int) or local_parallel_tasks < 1):
             raise ValueError(f"ERROR: job_settings.local_parallel_tasks is {local_parallel_tasks!r}, expected a positive number or auto.")
+
+        # max_grouping_size: auto becomes Slurm's MaxArraySize (POWHEGStage.max_grouping_size), but an
+        # MPI job runs all seeds of its group at the same time, so its size has to be chosen.
+        mpi_stages = [
+            stage_name for stage_name, stage_config in stages.items()
+            if stage_config['enabled']
+            and stage_config['resources']['batch_system'] == 'slurm'
+            and stage_config['resources']['submission_type'] == 'mpi'
+            and stage_config['resources']['max_grouping_size'] == 'auto'
+        ]
+        if mpi_stages:
+            raise ValueError(
+                f"ERROR: Stage {', '.join(mpi_stages)} has submission_type mpi and max_grouping_size auto, which "
+                f"would put up to Slurm's MaxArraySize seeds into one MPI job. Set max_grouping_size to a number."
+            )
 
         # A user without privileges can only raise the niceness.
         local_niceness = self['job_settings']['local_niceness']

@@ -23,7 +23,7 @@ import yaml
 
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapperTask
-from .config import POWHEGConfig, ANALYSIS_STAGES, NO_MERGE
+from .config import POWHEGConfig, ANALYSIS_STAGES, NO_MERGE, slurm_max_array_size
 from .merge import METHOD_NAMES, merge_histograms
 from .ub_correction import correction_factors
 
@@ -304,10 +304,18 @@ class POWHEGStage(POWHEGBaseTask):
         Maximum number of tasks to group together in a single batch job,
         as configured per stage (resources.max_grouping_size).
 
+        auto stays in the config and is resolved here: only luigi's worker in the main process reads
+        this, once per task family, so batch jobs never query Slurm for it. Every auto in a process
+        gets the same value, since luigi uses the value of the first task of a family for all of them.
+
         Returns:
             The maximum number of tasks to group together.
         """
-        return int(self.config["stages"][self.stage]["resources"]["max_grouping_size"])
+        max_grouping_size = self.config["stages"][self.stage]["resources"]["max_grouping_size"]
+        if max_grouping_size == "auto":
+            return slurm_max_array_size()
+        else:
+            return int(max_grouping_size)
 
     @property
     def submission_type(self) -> str:
