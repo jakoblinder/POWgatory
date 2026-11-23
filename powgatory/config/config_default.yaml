@@ -20,7 +20,7 @@ job_settings:
   mail_user: ""
   run_dir: "powheg_output"          # Where powheg is run and output files are stored
   log_dir: "powheg_output/logs"     # Where log files are stored
-  exclude_nodes: ""                 # Comma-separated list of nodes to exclude
+  exclude_nodes: ""                 # Nodes to exclude, as for sbatch --exclude, e.g. "node[01-09],node[15-16]"
   # Container image - leave empty or omit to run without container
   # Options:
   #   - Registry URL: "oras://gitlab-registry.mpcdf.mpg.de/mpp/containers/jlinder/powheg:powheg-latest"

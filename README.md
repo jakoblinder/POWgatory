@@ -250,7 +250,7 @@ job_settings:
   mail_user: ""
   run_dir: "powheg_output"          # where POWHEG runs and writes output
   log_dir: "powheg_output/logs"     # where job logs are written
-  exclude_nodes: ""                 # comma-separated list of nodes to exclude
+  exclude_nodes: ""                 # nodes to exclude, as for sbatch --exclude, e.g. "node[01-09],node[15-16]"
   container_image: ""               # registry URL (oras://...), local .sif path, or empty for no container
   copy_container_image: true        # copy a local image into the run_dir (false: use it in place)
   presubmit: ""                     # shell command run once before the workflow starts

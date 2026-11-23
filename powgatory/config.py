@@ -108,8 +108,10 @@ class POWHEGConfig:
             # Query available partition info from sinfo (hardcoded for now; to be made configurable later)
             self.get_partition_info()
 
-        if not self["job_settings"]["exclude_nodes"]:
-            self["job_settings"]["exclude_nodes"] = []
+        exclude_nodes = self["job_settings"]["exclude_nodes"] or []
+        if isinstance(exclude_nodes, str):
+            exclude_nodes = [node.strip() for node in exclude_nodes.split(",")]
+        self["job_settings"]["exclude_nodes"] = exclude_nodes
 
         for warning in self.validate_workflow_structure():
             print(warning)
