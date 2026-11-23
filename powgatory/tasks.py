@@ -169,12 +169,7 @@ class POWHEGStageSetup(POWHEGBaseTask):
 
                     for param_name, param_value in replacements.items():
                         if name in [param_name, param_name[1:]] and not found[param_name]:
-                            param_value = re.sub(
-                                r"(?P<bdot>\d)+p(?P<adot>\d*)",
-                                r"\g<bdot>.\g<adot>",
-                                str(param_value)
-                            )
-                            new_line = f"{name}{param_value:>{total_length}}"
+                            new_line = f"{name} {str(param_value):>{total_length - 1}}"
                             if comment:
                                 new_line += f"  ! {comment}"
                             new_line += "\n"
