@@ -10,6 +10,7 @@ import subprocess
 from typing import Dict, Any, Optional
 
 from .merge import METHOD_NAMES
+from .grid_contributions import grid_contributions
 
 # Stages that analyse the stage-4 event files, each with its own <stage>_executable.
 ANALYSIS_STAGES = ("lhef", "pythia")
@@ -59,6 +60,13 @@ class POWHEGConfig:
         self["job_settings"]["run_dir"].mkdir(exist_ok=True)
         self["job_settings"]["log_dir"].mkdir(exist_ok=True)
 
+        # The grid combination runs stage-3 seeds, which all have to run with the same input.
+        if "powheg_parameters" in self["stages"]["stage3_fullgrid"]:
+            raise ValueError(
+                "ERROR: stage3_fullgrid runs stage-3 seeds with stage3's powheg_parameters. "
+                "Set them under stages.stage3.powheg_parameters instead."
+            )
+
         # Complete resources and powheg_parameters information for each stage,
         # so that each stage has its own resources and powheg_parameters,
         # either from the stage-specific config or from the global defaults.
@@ -75,6 +83,17 @@ class POWHEGConfig:
                 for param in self["powheg_parameters"]:
                     if param not in self["stages"][stage]["powheg_parameters"]:
                         self["stages"][stage]["powheg_parameters"][param] = self["powheg_parameters"][param]
+
+        # The grid combination runs the first stage-3 seeds, one per contribution whose grids
+        # POWHEG combines (see tasks.grid_combination_seeds). The count is read from the files,
+        # so that batch jobs get the same config and task IDs.
+        grid_combination = self["stages"]["stage3_fullgrid"]
+        grid_combination["powheg_parameters"] = self["stages"]["stage3"]["powheg_parameters"]
+        if grid_combination["enabled"] and grid_combination["contributions"] == "auto":
+            contributions = grid_contributions(self["powheg_input_template"], grid_combination["powheg_parameters"])
+            grid_combination["contributions"] = len(contributions)
+            print(f"stage3_fullgrid: the grids of {', '.join(contributions) or 'no contribution'} are combined, "
+                  f"according to {self['powheg_input_template']} and stage3's powheg_parameters.")
 
         # Cluster configuration is queried live from Slurm rather than hand-maintained, since a
         # stage's partition is now resolved above. Skip the query entirely for fully-local runs,
@@ -233,8 +252,8 @@ class POWHEGConfig:
 
         Stage dependencies (noting that Stage 1 has iterations):
         - Stage 1 (all iterations) → Stage 2
-        - Stage 2 → Stage 3 (or Stage 3 GridCombine)
-        - Stage 3/GridCombine → Stage 4
+        - Stage 2 → Stage 3 grid combination (stage3_fullgrid, optional) → Stage 3
+        - Stage 3 → Stage 4
         - Stage 4 → lhef/pythia/AddWeights (optional)
 
         Args:
@@ -261,16 +280,26 @@ class POWHEGConfig:
         if is_enabled('stage3') and not is_enabled('stage2'):
             warnings.append("WARNING: Stage 3 is enabled but Stage 2 is disabled")
 
-        # Check Stage 3 GridCombine requires Stage 2
-        if stages.get('stage3', {}).get('grid_combination', False) and not is_enabled('stage2'):
-            warnings.append("WARNING: Stage 3 grid combination is enabled but Stage 2 is disabled")
+        # Check the Stage 3 grid combination requires Stage 2
+        if is_enabled('stage3_fullgrid') and not is_enabled('stage2'):
+            warnings.append("WARNING: Stage stage3_fullgrid is enabled but Stage 2 is disabled")
 
-        # Check Stage 4 requires Stage 3 (or GridCombine)
-        if is_enabled('stage4'):
-            has_stage3 = is_enabled('stage3')
-            has_gridcombine = stages.get('stage3', {}).get('grid_combination', False)
-            if not (has_stage3 or has_gridcombine):
-                warnings.append("WARNING: Stage 4 is enabled but Stage 3 is disabled and grid_combination is not enabled")
+        # The grid combination runs the first seeds of Stage 3, which needs seeds of its own: its
+        # timings task fails without any.
+        if is_enabled('stage3_fullgrid'):
+            contributions = stages['stage3_fullgrid']['contributions']
+            stage3_ntasks = stages['stage3']['resources']['ntasks']
+            if contributions not in (1, 2, 3):
+                raise ValueError(f"ERROR: Stage stage3_fullgrid has {contributions!r} contributions, expected 1, 2 or 3 (or auto).")
+            elif stage3_ntasks <= contributions:
+                raise ValueError(
+                    f"ERROR: Stage stage3_fullgrid runs the first {contributions} seeds of Stage 3, which has only "
+                    f"{stage3_ntasks} (ntasks). Give Stage 3 more seeds, or disable stage3_fullgrid."
+                )
+
+        # Check Stage 4 requires Stage 3
+        if is_enabled('stage4') and not is_enabled('stage3'):
+            warnings.append("WARNING: Stage 4 is enabled but Stage 3 is disabled")
 
         # Check the analysis stages require Stage 4
         for analysis_stage in ANALYSIS_STAGES:

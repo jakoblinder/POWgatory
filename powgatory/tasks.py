@@ -109,12 +109,8 @@ class POWHEGStageSetup(POWHEGBaseTask):
             return f"{self.stage}_setup"
 
     def output(self):
-        if self.grid_iteration > 0:
-            input_file = self.local_target(f"p{self.stage_number}-x{self.grid_iteration}-powheg.input")
-        else:
-            input_file = self.local_target(f"p{self.stage_number}-powheg.input")
-
-        return input_file
+        # The name create_powheg_input writes: e.g. p1-x2-powheg.input, or stage3_fullgrid-powheg.input.
+        return self.local_target(f"{self.stage_code(self.stage, self.grid_iteration)}-powheg.input")
 
     def run(self):
         """Create the input file."""
@@ -126,7 +122,7 @@ class POWHEGStageSetup(POWHEGBaseTask):
 
         Args:
             stage (str): POWHEG stage number (stage1, stage2, stage3, stage4,
-                                              stage3_gridcombine, analysis, addweights)
+                                              stage3_fullgrid, analysis, addweights)
             grid (int): Grid iteration number (1, 2, 3, ...)
         Returns:
             Path to the created input file.
@@ -242,6 +238,9 @@ class POWHEGCreateSymlinks(POWHEGBaseTask):
             stages_config       = self.config['stages']
             max_grid_iterations = stages_config['stage1'].get('grid_iterations', 3)
             yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
+        elif self.stage == "stage3" and self.config["stages"]["stage3_fullgrid"]["enabled"]:
+            # The grid combination has run the first seeds of stage 3 and written the fullgrid files.
+            yield POWHEGStageTimings(stage="stage3_fullgrid", version=self.version, config=self.config)
         elif self.stage_number > 2:
             # Depend on previous stage for stage > 2
             yield POWHEGStageTimings(stage=self.get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
@@ -500,6 +499,9 @@ class POWHEGStage(POWHEGBaseTask):
             stages_config       = self.config['stages']
             max_grid_iterations = stages_config['stage1'].get('grid_iterations', 3)
             yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
+        elif self.stage == "stage3" and self.config["stages"]["stage3_fullgrid"]["enabled"]:
+            # The grid combination has run the first seeds of stage 3 and written the fullgrid files.
+            yield POWHEGStageTimings(stage="stage3_fullgrid", version=self.version, config=self.config)
         elif self.stage_number > 2:
             # Depend on previous stage for stage > 2
             yield POWHEGStageTimings(stage=self.get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
@@ -672,7 +674,30 @@ class POWHEGStage(POWHEGBaseTask):
         record of what happened in the failed attempt.
         """
         # Also grab the log file from the previous attempt, so we don't lose it.
-        return self._move_to_backup(self._output_paths() | {self._powheg_log_file()})
+        return self._move_to_backup(self._output_paths() | {self._powheg_log_file()} | self._own_fullgrid_locks())
+
+    def _own_fullgrid_locks(self) -> set:
+        """
+        The fullgrid locks (pwg-<contribution>-fullgrid.lock) left by an earlier attempt of this
+        stage-3 seed. In stage 3, POWHEG writes the seed into the lock of the contribution whose
+        grids it combines, and pwhg_exit deletes the lock. A lock is only left behind when the
+        process was killed (time limit, scancel, node failure), and every other seed would then wait
+        for it forever. A lock with this seed's number can only come from such an attempt, since a
+        seed never runs twice at the same time; locks of other seeds are left alone.
+        """
+        if self.stage in ("stage3_fullgrid", "stage3"):
+            run_dir = Path(self.config['job_settings']['run_dir'])
+            return {lock for lock in run_dir.glob("*-fullgrid.lock") if self._lock_seed(lock) in seed_strings(self.branch_id)}
+        else:
+            return set()
+
+    @staticmethod
+    def _lock_seed(lock: Path) -> str:
+        """The seed POWHEG wrote into a lock file, or "" if it is empty or already deleted by its seed."""
+        try:
+            return lock.read_text().strip()
+        except OSError:
+            return ""
 
     def _output_paths(self) -> set:
         """
@@ -986,6 +1011,29 @@ def stage4_seeds(config) -> range:
     return range(1, config["stages"]["stage4"]["resources"]["ntasks"] + 1)
 
 
+def grid_combination_seeds(config) -> range:
+    """
+    The seeds of the grid combination (stage3_fullgrid): the first stage-3 seeds, one per
+    contribution. In bbinit.f, seed k starts with contribution k (btilde, remn, reg), so with
+    btilde switched on, these seeds combine the grids of all contributions in parallel.
+    """
+    return range(1, config["stages"]["stage3_fullgrid"]["contributions"] + 1)
+
+
+def stage_seeds(config, stage: str) -> range:
+    """
+    The seeds of stage 1-4 or of the grid combination. With the grid combination, stage 3 runs
+    only the seeds after it: luigi runs a task it scheduled as incomplete without checking
+    complete() again, so stage 3 would otherwise run the grid combination's seeds a second time.
+    """
+    if stage == "stage3_fullgrid":
+        return grid_combination_seeds(config)
+    elif stage == "stage3" and config["stages"]["stage3_fullgrid"]["enabled"]:
+        return range(len(grid_combination_seeds(config)) + 1, config["stages"]["stage3"]["resources"]["ntasks"] + 1)
+    else:
+        return range(1, config["stages"][stage]["resources"]["ntasks"] + 1)
+
+
 def seed_file(directory: Path, pattern: str, seed: int) -> Path:
     """
     The file named by pattern (e.g. "pwgevents-{seed}.lhe") in directory, with the seed in four
@@ -1280,7 +1328,7 @@ class POWHEGStageWrapper(POWHEGWrapperTask):
             branch_ids = stage4_seeds(self.config)
             stage_task = POWHEGAnalysis
         else:
-            branch_ids = range(1, self.config["stages"][f"{self.stage}"]["resources"]['ntasks'] + 1)
+            branch_ids = stage_seeds(self.config, self.stage)
             stage_task = POWHEGStage
 
         for branch_id in branch_ids:
@@ -1319,6 +1367,9 @@ class POWHEGWorkflow(POWHEGWrapperTask):
         if highest_stage == 1:
             max_grid_iterations = stages_config["stage1"]["grid_iterations"]
             yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
+        elif highest_stage == 2 and stages_config['stage3_fullgrid']['enabled']:
+            # The grid combination comes between stage 2 and stage 3, so a run can stop after it.
+            yield POWHEGStageTimings(stage="stage3_fullgrid", version=self.version, config=self.config)
         else:
             yield POWHEGStageTimings(stage=self.get_stage_str(highest_stage), version=self.version, config=self.config)
 

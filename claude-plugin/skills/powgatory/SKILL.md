@@ -9,8 +9,9 @@ POWgatory runs a POWHEG-BOX campaign from one `run.yaml`: it expands the stages 
 jobs (b2luigi), submits them as Slurm array jobs or runs them as local processes, and waits until
 each stage is done before starting the next one:
 
-stage 1 (`grid_iterations` iterations) → stage 2 → stage 3 → stage 4 → optional `lhef` and
-`pythia` analyses of the event files → merge of the histograms of stage 2, `lhef` and `pythia`.
+stage 1 (`grid_iterations` iterations) → stage 2 → optional grid combination `stage3_fullgrid` →
+stage 3 → stage 4 → optional `lhef` and `pythia` analyses of the event files → merge of the
+histograms of stage 2, `lhef` and `pythia`.
 
 A branch counts as done when its output files exist and are non-empty, not by exit code. Running
 `powgatory -c run.yaml` again therefore only (re)runs what is incomplete.
@@ -59,6 +60,27 @@ A branch counts as done when its output files exist and are non-empty, not by ex
 6. `powgatory -c run.yaml` starts the run. `--workers N` limits the number of jobs submitted or
    running at the same time (default 250). Several configs: `powgatory -c a.yaml b.yaml`.
 
+## Grid combination before stage 3
+
+At the start of stage 3, one seed per contribution (btilde, remn, reg) combines the stage-2 grids
+into a fullgrid file while all other seeds wait; this can take hours. Suggest
+`stages.stage3_fullgrid.enabled: true` when stage-3 jobs run into their time limit, or when the
+user mentions fullgrid files or grid combination:
+
+- Its seeds are the first stage-3 seeds, one per contribution. Stage 3 runs the others only
+  afterwards, and needs more seeds (`ntasks`) than `contributions`.
+- `contributions: auto` (default) reads the number from the input; `1`, `2` or `3` sets it, e.g.
+  for older POWHEG versions. The config output names the contributions it found.
+- `stages.stage3_fullgrid.resources.batch_system: local` runs it on the node POWgatory runs on,
+  without a Slurm time limit. Or give only this stage a longer `time`.
+- It uses stage 3's `powheg_parameters` and cannot have its own. Its logs are
+  `stage3_fullgrid-s<seed>.log`.
+- A killed seed leaves its `pwg-<contribution>-fullgrid.lock` in the run directory, and the other
+  seeds wait for it. POWgatory moves the lock aside when that seed runs again. If stage-3 seeds
+  hang on "lock ... already there, waiting" while the seed named in the lock does not run (an
+  empty lock, or a seed no longer in the run), ask before deleting the lock, and only when no
+  stage-3 job is running.
+
 ## Analyses and merged histograms
 
 - `lhef` and `pythia` run `lhef_executable` / `pythia_executable` once per stage-4 seed, in
@@ -78,7 +100,7 @@ A branch counts as done when its output files exist and are non-empty, not by ex
 - `squeue -u $USER`, `sacct -u $USER -S <time>` for the jobs.
 - `<run_dir>/timings.yaml`: per finished stage, the number of runs and their run times.
 - `<run_dir>/logs/<job_code>.log`: the program's output of one branch; `<job_code>` is e.g.
-  `p1-x2-s7` (stage 1, grid iteration 2, seed 7), `p4-s12`, `lhef-s3`.
+  `p1-x2-s7` (stage 1, grid iteration 2, seed 7), `p4-s12`, `stage3_fullgrid-s1`, `lhef-s3`.
   `<run_dir>/logs/<job_code>/stdout` and `stderr`: the batch job's output.
 - `<run_dir>/incomplete_run_backups/`: files of earlier failed or interrupted attempts.
 

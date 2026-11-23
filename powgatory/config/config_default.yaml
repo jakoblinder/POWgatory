@@ -62,16 +62,25 @@ stages:
     # -1 no merge.
     merge_method: 1
 
+  # Grid combination: at the start of stage 3, POWHEG combines the stage-2 grids of each
+  # contribution (btilde, remn, reg) into a fullgrid file, while all other seeds wait. This can
+  # take hours. When enabled, the first stage-3 seeds, one per contribution, run as a stage of
+  # their own, and stage 3 runs its other seeds only afterwards. Give this stage its own
+  # resources: batch_system local runs it on the node powgatory runs on (e.g. the login node),
+  # without a Slurm time limit, or set a longer time for this stage only. Its seeds run with
+  # stage3's powheg_parameters (it has none of its own); their logs are stage3_fullgrid-s<seed>.log.
+  stage3_fullgrid:
+    enabled: false
+    # The number of contributions, i.e. of seeds. auto reads them from powheg_input_template with
+    # stage3's powheg_parameters, as POWHEG-BOX-RES does: btilde unless withbtilde 0; remn with
+    # hdamp > 0, hfact > 0, withdamp 1 or bornzerodamp 1, unless withremnants 0; reg unless
+    # withregular 0 (a process without regular contributions then gets one seed more than
+    # needed, which waits); remn and reg never with bornonly 1, LOevents 1 or virtonly 1.
+    # For other POWHEG versions, set 1, 2 or 3. Stage 3 needs more seeds (ntasks) than this.
+    contributions: auto
+
   stage3:
     enabled: true
-    grid_combination: false             # Use dedicated grid combination phase
-
-  stage3_gridcombine:
-    enabled: false
-    use_tmp: true                      # Use local /tmp for speed
-    resources:
-      ntasks: 3                        # Grid combination: 3 seeds only
-      time: "4:00:00"
 
   stage4:
     enabled: true

@@ -14,6 +14,7 @@ This document is the single reference for installing, configuring, and running P
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Pipeline architecture](#pipeline-architecture)
+- [Grid combination](#grid-combination)
 - [Analysis stages](#analysis-stages)
 - [Merging histograms](#merging-histograms)
 - [Configuration reference](#configuration-reference)
@@ -128,6 +129,9 @@ POWHEGStage1(grid=1) → POWHEGStage1(grid=2) → POWHEGStage1(grid=3)
                                                POWHEGStage2
                                                       │
                                                       ▼
+                                   (stage3_fullgrid, optional, see below)
+                                                      │
+                                                      ▼
                                                POWHEGStage3
                                                       │
                                                       ▼
@@ -139,6 +143,33 @@ The analysis stages `lhef` and `pythia` (see [Analysis stages](#analysis-stages)
 `POWHEGMultiConfigWorkflow` lets a single CLI invocation submit several independent `run.yaml`s at once.
 
 A failed POWHEG run inside `POWHEGStage` (non-zero exit code) raises a `RuntimeError`, which fails that branch's b2luigi task. A branch that exits cleanly but whose output files never appear also fails, after a short polling window that allows for slow cluster filesystems. `POWHEGStage.complete()` checks for the expected POWHEG output files, not an exit code; both 4-digit (`-0042`) and 5-digit (`-12345`) seed suffixes are accepted, so runs with more than 9999 seeds work. Stale output files from a previous failed/killed attempt are moved into `incomplete_run_backups/` before each run so POWHEG (which refuses to overwrite an existing event file) doesn't choke on them.
+
+## Grid combination
+
+At the start of stage 3, POWHEG combines the stage-2 grids of each contribution (btilde, remn, reg) into a fullgrid file. One seed does this per contribution, while all other seeds wait for the fullgrid files. In POWHEG-BOX-RES, seed k starts with contribution k, so the first seeds combine the grids in parallel. This can take hours, and every stage-3 job then needs a time limit that covers it.
+
+With the stage `stage3_fullgrid`, these first seeds run as a stage of their own between stage 2 and stage 3. Stage 3 runs its other seeds only afterwards, when the fullgrid files exist:
+
+```yaml
+stages:
+  stage3_fullgrid:
+    enabled: true
+    contributions: auto        # or 1, 2, 3
+    resources:
+      batch_system: local      # e.g. on the login node, without a Slurm time limit
+```
+
+- The stage has its own `resources`. With `batch_system: local`, its seeds run as local processes on the node `powgatory` runs on, while all other stages stay on Slurm. Alternatively, keep Slurm and give only this stage a longer `time`.
+- Its seeds are stage-3 seeds 1 to `contributions`. They run POWHEG's complete stage 3, with stage 3's `powheg_parameters`. The stage cannot have `powheg_parameters` of its own. Stage 3 runs the seeds after them, so it needs more seeds (`ntasks`) than `contributions`. The stage's own `ntasks` is not used.
+- `contributions: auto` reads the number when the config is loaded, from `powheg_input_template` with stage 3's `powheg_parameters`, by POWHEG-BOX-RES's rules (`bbinit.f`):
+  - btilde: unless `withbtilde 0`.
+  - remn: with `hdamp > 0`, `hfact > 0`, `withdamp 1` or `bornzerodamp 1`, unless `withremnants 0`.
+  - reg: unless `withregular 0`.
+  - remn and reg: never with `bornonly 1`, `LOevents 1` or `virtonly 1`.
+
+  Whether a process has regular contributions at all depends on the process, not on the input. A process without them gets one seed more than needed, which waits for the others and then does its normal stage-3 work. For other POWHEG versions, set `contributions` to 1, 2 or 3.
+- Its logs are `logs/stage3_fullgrid-s<seed>.log`, and `timings.yaml` has an entry `stage3_fullgrid`.
+- POWHEG writes the seed into a lock `pwg-<contribution>-fullgrid.lock` while that seed combines the contribution's grids, and deletes the lock when it exits. A seed that is killed instead (time limit, `scancel`, node failure) leaves its lock behind, and all other seeds would wait for it forever. When the killed seed runs again, POWgatory moves its own lock into `incomplete_run_backups/`. This holds for the grid combination and for stage 3. Locks of other seeds are left alone.
 
 ## Analysis stages
 
@@ -290,7 +321,7 @@ Further notes:
 
 - `batch_system: local` ignores `partition` and runs each branch as a local subprocess instead of submitting to Slurm (useful for testing without cluster access).
 - `container_image` accepts a registry URL (pulled once into `<run_dir>/powheg.sif` via `apptainer pull`), a local file path (copied into the run directory, or used in place with `copy_container_image: false`), or an empty string to run without a container.
-- The config file also defines `stage3.grid_combination`, a `stage3_gridcombine` stage, and an `addweights` stage. **These are configuration placeholders only** — see [Known limitations](#known-limitations).
+- The config file also defines an `addweights` stage. **It is a configuration placeholder only** — see [Known limitations](#known-limitations).
 
 ## Batch submission details
 
@@ -396,7 +427,7 @@ Get a newer version of the skill with `claude plugin update powgatory@powgatory`
 Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 
 - `task_files/` — b2luigi's generated submission scripts.
-- `logs/<job_code>/` — POWHEG stdout/stderr per branch, bracketed with `<Started-POWHEG:...>`/`<Finished-POWHEG:...>` markers that `POWHEGStageTimings` parses.
+- `logs/<job_code>/` — POWHEG stdout/stderr per branch, bracketed with `<Started-POWHEG:...>`/`<Finished-POWHEG:...>` markers that `POWHEGStageTimings` parses. The job code is e.g. `p1-x2-s7` (stage 1, grid iteration 2, seed 7), `p3-s12`, or `stage3_fullgrid-s1` for a seed of the grid combination.
 - `timings.yaml` — per-stage timing statistics (shortest/longest/average/total), updated as each stage completes.
 - `incomplete_run_backups/` — output files quarantined from a previous failed or killed attempt, or from a POWHEG run that exited with an error.
 - `.powgatory.lock` — held by the running POWgatory, so that a second one on the same `run_dir` stops.
@@ -419,7 +450,8 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 
 This reflects the current state of the code, so gaps are documented rather than hidden:
 
-- `stage3.grid_combination`, the `stage3_gridcombine` stage, and the `addweights` stage are all present in the configuration schema but have **no corresponding task implementation** — enabling them has no effect. `powgatory/scrap.py` contains an old, unused draft of this work and is not imported anywhere.
+- The `addweights` stage is present in the configuration schema but has **no corresponding task implementation** — enabling it has no effect. `powgatory/scrap.py` contains an old, unused draft of this work and is not imported anywhere.
+- A stale `pwg-<contribution>-fullgrid.lock` (see [Grid combination](#grid-combination)) is only cleared when the seed that wrote it runs again. If the seed is no longer part of the run (fewer `contributions` or `ntasks` in the rerun), or if it was killed in the instant between POWHEG creating the lock and writing the seed into it (an empty lock), delete the lock by hand while no stage-3 job is running.
 - `lhef_analysis` writes its `.top` files already every 20000 events, not only at the end. An analysis branch with more events per seed that is killed during the run can leave files that count as complete; delete them to rerun that seed.
 - `submission_type: array` and `mpi` depend on unreleased `b2luigi` functionality, installed from a fork (see [Requirements](#requirements)).
 - For `submission_type: mpi`, the live `sinfo` data in `POWHEGStage.partition_info` is not yet passed on to b2luigi; b2luigi packs sub-tasks onto nodes using its own `tasks_per_node` setting (default 64), which must match the partition.

@@ -84,7 +84,7 @@ class POWHEGBaseTask(Task):
 
     stage          = b2luigi.Parameter(
         default="stage1",
-        description="POWHEG stage number (stage1, stage2, stage3, stage4, stage3_gridcombine, lhef, pythia, addweights)"
+        description="POWHEG stage number (stage1, stage2, stage3, stage4, stage3_fullgrid, lhef, pythia, addweights)"
     )
     grid_iteration = b2luigi.IntParameter(
         default=1,
@@ -155,13 +155,13 @@ class POWHEGBaseTask(Task):
     @staticmethod
     def get_stage_number(stage:str) -> int:
         """Return the numeric stage number for resource lookup."""
-        if stage.startswith("stage") and not stage.endswith("_gridcombine"):
+        if stage.startswith("stage") and not stage.endswith("_fullgrid"):
             return int(stage.replace("stage", ""))
         elif stage == "addweights":
             return 4
         elif stage == "analysis":
             return 1  # Analysis stage doesn't have a specific number
-        elif stage == "stage3_gridcombine":
+        elif stage == "stage3_fullgrid":
             return 3
         else:
             raise ValueError(f"Unknown stage: {stage}")
@@ -292,7 +292,7 @@ class POWHEGBaseTask(Task):
         Returns:
             str: Unique stage identifier (e.g., "p1-x1" for stage1 grid iteration 1).
         """
-        if isinstance(stage, str) and stage.startswith("stage") and not stage.endswith("_gridcombine"):
+        if isinstance(stage, str) and stage.startswith("stage") and not stage.endswith("_fullgrid"):
             # stage_number = int(stage.replace("stage", ""))
             if grid > 0:
                 return f"p{self.get_stage_number(stage)}-x{grid}"
@@ -350,13 +350,13 @@ class POWHEGWrapperTask(b2luigi.WrapperTask):
     @staticmethod
     def get_stage_number(stage:str) -> int:
         """Return the numeric stage number for resource lookup."""
-        if stage.startswith("stage") and not stage.endswith("_gridcombine"):
+        if stage.startswith("stage") and not stage.endswith("_fullgrid"):
             return int(stage.replace("stage", ""))
         elif stage == "addweights":
             return 4
         elif stage == "analysis":
             return 1  # Analysis stage doesn't have a specific number
-        elif stage == "stage3_gridcombine":
+        elif stage == "stage3_fullgrid":
             return 3
         else:
             raise ValueError(f"Unknown stage: {stage}")
