@@ -9,7 +9,7 @@ import shutil
 import yaml
 import sys
 import subprocess
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from .merge import METHOD_NAMES
 from .grid_contributions import grid_contributions
@@ -26,9 +26,27 @@ NO_MERGE = -1
 
 
 @functools.cache
-def sinfo_partition_table() -> str:
-    """The output of sinfo with the nodes, CPUs, memory and time limit of every partition."""
-    return subprocess.check_output(["sinfo", "--noheader", "-o", "%P %D %c %z %m %l"]).decode()
+def slurm_partitions() -> Dict[str, Dict[str, Any]]:
+    """
+    The number of nodes, the CPUs and memory per node, and the time limit of every partition, from
+    sinfo. It is not stored in the config: batch jobs rebuild the config to find their task ID and
+    would otherwise each have to query sinfo again, and get exactly the same answer.
+    """
+    output = subprocess.check_output(["sinfo", "--noheader", "-o", "%P %D %c %z %m %l"]).decode()
+
+    partitions: Dict[str, Dict[str, Any]] = {}
+    for line in output.strip().splitlines():
+        partition, nodes, cpus, sct, memory, time_limit = line.split()
+        partition = partition.rstrip("*")  # sinfo marks the default partition with "*"
+        cpus = cpus.rstrip("+")  # sinfo marks a lower-bound value with "+" when grouped nodes' CPU counts differ
+                                 # Note that this is a delicate situation and can cause problems.
+        entry = partitions.setdefault(
+            partition,
+            {"nodes": 0, "cpus": int(cpus), "sct": sct, "memory": memory, "time_limit": time_limit},
+        )
+        entry["nodes"] += int(nodes)  # sinfo lists one row per node state within a partition
+
+    return partitions
 
 
 @functools.cache
@@ -124,19 +142,6 @@ class POWHEGConfig:
             print(f"stage3_fullgrid: the grids of {', '.join(contributions) or 'no contribution'} are combined, "
                   f"according to {self['powheg_input_template']} and stage3's powheg_parameters.")
 
-        # Cluster configuration is queried live from Slurm rather than hand-maintained, since a
-        # stage's partition is now resolved above. Skip the query entirely for fully-local runs,
-        # where sinfo isn't available.
-        requires_slurm = any(
-            stage_config.get("enabled", False) and stage_config["resources"]["batch_system"] == "slurm"
-            for stage_config in self["stages"].values()
-        )
-
-        self["cluster_config"] = {"slurm": {}, "local": {}}
-        if requires_slurm:
-            # Query available partition info from sinfo (hardcoded for now; to be made configurable later)
-            self.get_partition_info()
-
         exclude_nodes = self["job_settings"]["exclude_nodes"] or []
         if isinstance(exclude_nodes, str):
             exclude_nodes = [node.strip() for node in exclude_nodes.split(",")]
@@ -183,29 +188,6 @@ class POWHEGConfig:
             config_dict["resources"] = {}
 
         return config_dict
-
-    def get_partition_info(self) -> None:
-        """
-        Query `sinfo` for the number of nodes, CPUs, memory, and time limit available per
-        partition, and store the result in cluster_config["slurm"].
-        # TODO: Make this configurable (e.g. skip the query if the config file already
-        # provides this info, or let it be overridden from there).
-        """
-        output = sinfo_partition_table()
-
-        partition_info: Dict[str, Dict[str, Any]] = {}
-        for line in output.strip().splitlines():
-            partition, nodes, cpus, sct, memory, time_limit = line.split()
-            partition = partition.rstrip("*")  # sinfo marks the default partition with "*"
-            cpus = cpus.rstrip("+")  # sinfo marks a lower-bound value with "+" when grouped nodes' CPU counts differ
-                                     # Note that this is a delicate situation and can cause problems.
-            entry = partition_info.setdefault(
-                partition,
-                {"nodes": 0, "cpus": int(cpus), "sct": sct, "memory": memory, "time_limit": time_limit},
-            )
-            entry["nodes"] += int(nodes)  # sinfo lists one row per node state within a partition
-
-        self["cluster_config"]["slurm"] = partition_info
 
     @staticmethod
     def _parse_slurm_time(time_str: str) -> Optional[int]:
@@ -392,21 +374,64 @@ class POWHEGConfig:
             if total_seconds is not None and total_seconds <= 0:
                 warnings.append(f"WARNING: Stage {stage_name} has non-positive time limit: {time_limit}")
 
-            if stage_config['resources']['batch_system'] == 'slurm':
-                partition = stage_config['resources']['partition']
-                if partition not in self['cluster_config']['slurm']:
-                    available = ", ".join(sorted(self['cluster_config']['slurm']))
-                    raise ValueError(
-                        f"ERROR: Stage {stage_name} uses partition '{partition}', which sinfo does not "
-                        f"report on this cluster. Available partitions: {available}"
-                    )
-                partition_time_limit = self['cluster_config']['slurm'][partition]['time_limit']
-                partition_seconds = self._parse_slurm_time(partition_time_limit)
+        # An MPI job requests mem times its ranks per node (POWHEGStage.slurm_settings).
+        for stage_name in self.slurm_stages():
+            resources = stages[stage_name]['resources']
+            if resources['submission_type'] == 'mpi' and not isinstance(resources['mem'], int):
+                raise ValueError(
+                    f"ERROR: Stage {stage_name} has submission_type mpi and mem {resources['mem']!r}, expected "
+                    f"a number of MB per seed, which is multiplied by the seeds per node."
+                )
 
-                if partition_seconds is not None and total_seconds is not None and total_seconds > partition_seconds:
+        return warnings
+
+    def slurm_stages(self) -> List[str]:
+        """The enabled stages that are submitted to Slurm."""
+        return [
+            stage_name for stage_name, stage_config in self['stages'].items()
+            if stage_config['enabled'] and stage_config['resources']['batch_system'] == 'slurm'
+        ]
+
+    def validate_partitions(self, partitions: Dict[str, Dict[str, Any]]) -> List[str]:
+        """
+        Check every enabled Slurm stage against the partitions from sinfo (slurm_partitions()): the
+        partition has to exist, and the time limit and, for mpi, the memory of a full node should fit.
+        Only the process that starts the run calls this, so that batch jobs don't query sinfo.
+
+        Returns:
+            List of warning messages (empty if all valid)
+        """
+        warnings = []
+        for stage_name in self.slurm_stages():
+            resources = self['stages'][stage_name]['resources']
+            partition = resources['partition']
+            if partition not in partitions:
+                raise ValueError(
+                    f"ERROR: Stage {stage_name} uses partition '{partition}', which sinfo does not "
+                    f"report on this cluster. Available partitions: {', '.join(sorted(partitions))}"
+                )
+
+            partition_info = partitions[partition]
+            try:
+                stage_seconds = self._parse_slurm_time(resources['time'])
+            except ValueError:
+                stage_seconds = None  # validate_workflow_structure warns about the format
+            partition_seconds = self._parse_slurm_time(partition_info['time_limit'])
+            if stage_seconds is not None and partition_seconds is not None and stage_seconds > partition_seconds:
+                warnings.append(
+                    f"WARNING: Stage {stage_name} time limit {resources['time']} exceeds partition "
+                    f"'{partition}' limit {partition_info['time_limit']}"
+                )
+
+            if resources['submission_type'] == 'mpi':
+                # sinfo marks a lower bound with "+" when the nodes of a partition differ.
+                node_memory      = int(partition_info['memory'].rstrip('+'))
+                full_node_memory = resources['mem'] * partition_info['cpus']
+                if full_node_memory > node_memory:
                     warnings.append(
-                        f"WARNING: Stage {stage_name} time limit {time_limit} exceeds partition "
-                        f"'{partition}' limit {partition_time_limit}"
+                        f"WARNING: Stage {stage_name} (mpi) requests mem {resources['mem']} MB x {partition_info['cpus']} "
+                        f"seeds = {full_node_memory} MB on a full node, but a node of partition '{partition}' has "
+                        f"{node_memory} MB, so such a job never starts."
                     )
 
         return warnings

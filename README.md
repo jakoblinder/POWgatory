@@ -335,9 +335,9 @@ Per-stage Slurm behavior is controlled by `resources.submission_type`:
 - **`array`** — all branches for a stage submitted as one Slurm job array.
 
 `resources.max_grouping_size` sets how many branches go into one submission (one job array, one MPI job, or one batch of `single` submissions). `auto` takes Slurm's `MaxArraySize` from `scontrol show config`, the most elements a job array may have. A stage with `submission_type: mpi` needs a number. Set it in the top-level `resources` block: luigi takes one value for all of stages 1-4 and `stage3_fullgrid` (one task family), from the first of their tasks it sees, so a per-stage value may not take effect.
-- **`mpi`** — all branches submitted as a single multi-node Slurm job, dispatched via `srun`/`$SLURM_PROCID`. Sizing information (nodes, CPUs, memory, time limit) for the stage's partition is queried live from `sinfo` at config-load time (not hand-maintained per-cluster config files) and exposed via `POWHEGStage.partition_info`.
+- **`mpi`** — all branches submitted as a single multi-node Slurm job, dispatched via `srun`/`$SLURM_PROCID`. One seed runs per CPU: the job packs as many seeds onto a node as the stage's partition has CPUs per node, and requests `mem` (per seed) times the seeds per node as `--mem`, since `--mem` is per node. The partition's CPUs, memory and time limit come from `sinfo` (`POWHEGStage.partition_info`), queried once by the POWgatory that starts the run, not stored in the config, so that batch jobs need no Slurm query.
 
-`POWHEGConfig` also uses this live `sinfo` data to warn (not fail) if a stage's requested `resources.time` exceeds its partition's actual Slurm time limit.
+POWgatory also uses this `sinfo` data to fail if a stage's partition doesn't exist, and to warn (not fail) if a stage's requested `resources.time` exceeds its partition's actual Slurm time limit, or if an `mpi` stage's `mem` times the CPUs per node exceeds a node's memory.
 
 Job submission is deliberately throttled: `cli.py` monkey-patches b2luigi's `SlurmProcess.start_job` to enforce a minimum interval between `sbatch` calls, to avoid overwhelming the scheduler when submitting large numbers of jobs.
 
@@ -460,7 +460,6 @@ This reflects the current state of the code, so gaps are documented rather than 
 - A stale `pwg-<contribution>-fullgrid.lock` (see [Grid combination](#grid-combination)) is only cleared when the seed that wrote it runs again. If the seed is no longer part of the run (fewer `contributions` or `ntasks` in the rerun), or if it was killed in the instant between POWHEG creating the lock and writing the seed into it (an empty lock), delete the lock by hand while no stage-3 job is running.
 - `lhef_analysis` writes its `.top` files already every 20000 events, not only at the end. An analysis branch with more events per seed that is killed during the run can leave files that count as complete; delete them to rerun that seed.
 - `submission_type: array` and `mpi` depend on unreleased `b2luigi` functionality, installed from a fork (see [Requirements](#requirements)).
-- For `submission_type: mpi`, the live `sinfo` data in `POWHEGStage.partition_info` is not yet passed on to b2luigi; b2luigi packs sub-tasks onto nodes using its own `tasks_per_node` setting (default 64), which must match the partition.
 - A job that hangs before POWgatory has moved an earlier attempt's log aside is not detected as hung, because that old log already shows POWHEG output. Such a job sits until its Slurm time limit and its branch fails; `scancel` it and rerun `powgatory`.
 
 ## License

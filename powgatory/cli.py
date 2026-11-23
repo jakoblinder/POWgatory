@@ -26,7 +26,7 @@ import b2luigi
 import luigi.configuration
 from b2luigi.batch.processes.slurm import SlurmProcess
 
-from .config import POWHEGConfig
+from .config import POWHEGConfig, slurm_partitions
 from . import __version__
 
 # This block makes sure that jobs are scheduled with a 2 second wait.
@@ -274,6 +274,13 @@ def run_workflow():
     configs = [POWHEGConfig.from_yaml(config_file) for config_file in config_files]
     for config in configs:
         config.validate_run_directory()
+
+    # Batch jobs skip this, so that they don't query sinfo (the controller limits requests per user).
+    if "--batch-runner" not in b2luigi_args:
+        slurm_configs = [config for config in configs if config.slurm_stages()]
+        warnings      = [warning for config in slurm_configs for warning in config.validate_partitions(slurm_partitions())]
+        for warning in warnings:
+            print(warning)
 
     # Batch jobs run this entry point too (with --batch-runner) and must not take the lock.
     if not args.dry_run and "--batch-runner" not in b2luigi_args:

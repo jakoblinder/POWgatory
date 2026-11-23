@@ -140,7 +140,7 @@ resources:
   partition: alma
   ntasks: 1                           # Number of seeds to run in parallel (array jobs) or number of MPI tasks (mpi jobs)
   time: "24:00:00"
-  mem: 4000
+  mem: 4000                           # MB per seed; for mpi multiplied by the seeds per node (--mem is per node)
 
 # ================================================================================
 # POWHEG PARAMETERS (override powheg.input-save defaults)

@@ -23,7 +23,7 @@ import yaml
 
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapperTask
-from .config import POWHEGConfig, ANALYSIS_STAGES, NO_MERGE, slurm_max_array_size
+from .config import POWHEGConfig, ANALYSIS_STAGES, NO_MERGE, slurm_max_array_size, slurm_partitions
 from .merge import METHOD_NAMES, merge_histograms
 from .ub_correction import correction_factors
 
@@ -330,11 +330,20 @@ class POWHEGStage(POWHEGBaseTask):
     @property
     def partition_info(self) -> Dict[str, Any]:
         """
-        sinfo-derived info (node count, CPUs, memory, time limit, ...) for this stage's partition.
-        Needed once submission_type == "mpi" is selected, to size the multi-node job.
+        sinfo-derived info (node count, CPUs and memory per node, time limit, ...) for this stage's
+        partition, used to size MPI jobs. sinfo is queried once per process, by the process that
+        reads this, i.e. the one that submits; it is not part of the config (see slurm_partitions).
         """
         partition = self.config["stages"][self.stage]["resources"]["partition"]
-        return self.config["cluster_config"]["slurm"][partition]
+        return slurm_partitions()[partition]
+
+    @property
+    def tasks_per_node(self) -> int:
+        """
+        b2luigi setting for submission_type mpi: how many seeds an MPI job runs per node, the CPUs per
+        node of the stage's partition. b2luigi requests ceil(seeds / tasks_per_node) nodes.
+        """
+        return self.partition_info["cpus"]
 
     @property
     def task_cmd_additional_args(self) -> List[str]:
@@ -470,6 +479,14 @@ class POWHEGStage(POWHEGBaseTask):
             mem           = self.config["stages"][self.stage]["resources"]["mem"]
             cpus_per_task = 1
             exclude_nodes = self.config["job_settings"]["exclude_nodes"]
+
+            if self.submission_type == "mpi":
+                # mem is per seed, but --mem is per node and the cluster has no --mem-per-cpu, so an
+                # MPI job requests mem for each of its seeds on a node. branch_id is the tuple of the
+                # group's seeds.
+                group_size     = len(self.branch_id) if isinstance(self.branch_id, tuple) else 1
+                seeds_per_node = min(group_size, self.tasks_per_node)
+                mem            = mem * seeds_per_node
 
             slurm_settings = {
                 "export": "NONE",
