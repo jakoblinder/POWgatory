@@ -45,6 +45,17 @@ job_settings:
   # A running job whose POWHEG has written nothing into its log after this many minutes is hung,
   # and is cancelled and resubmitted (0 = never checked).
   hung_start_minutes: 15
+  # How many jobs b2luigi keeps running at the same time: each local branch, local helper task and
+  # Slurm submission (one per group of up to max_grouping_size seeds) takes one, pending or running.
+  # The command-line option --workers overrides it.
+  workers: 250
+  # How many POWHEG runs (branches) of stages with batch_system local run at the same time on the
+  # node powgatory runs on. auto: the cores free when powgatory starts, i.e. the cores this process
+  # may use, but at most the node's cores minus its 5-minute load average. workers still caps all jobs.
+  local_parallel_tasks: auto
+  # Niceness (0-19, as for nice -n) of the POWHEG and analysis programs of stages with
+  # batch_system local. A higher value lets other processes on the node go first when it is busy.
+  local_niceness: 0
 
 # ============================================================================
 # STAGES TO RUN
@@ -115,13 +126,17 @@ stages:
 # RESOURCE SETTINGS
 # Can be set globally or per stage. If set per stage, global settings are ignored.
 # ================================================================================
-# For local execution, only 'ntasks' is used (time/partition are ignored).
-# GNU parallel runs up to 4 jobs concurrently by default.
+# For local execution, only 'ntasks' is used (time/partition are ignored). How many local branches
+# run at the same time is set by job_settings.local_parallel_tasks.
 resources:
   batch_system: slurm                 # Batch system: local or slurm
-                                      # Use 'local' for testing with GNU parallel. (The partition is then ignored.)
+                                      # local runs the branches as processes on the node powgatory runs on.
   submission_type: array              # Slurm submission type: single, array, or mpi
-  max_grouping_size: 1000             # Maximum number of tasks to group together in a single job submission
+  # Maximum number of seeds grouped into one job submission (one job array for submission_type array).
+  # auto: Slurm's MaxArraySize, the most elements a job array may have (scontrol show config).
+  # Set it in this top-level block: stages 1-4 and stage3_fullgrid share one value. A stage with
+  # submission_type mpi needs a number.
+  max_grouping_size: auto
   partition: alma
   ntasks: 1                           # Number of seeds to run in parallel (array jobs) or number of MPI tasks (mpi jobs)
   time: "24:00:00"

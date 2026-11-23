@@ -435,6 +435,18 @@ class POWHEGStage(POWHEGBaseTask):
         return self.config["stages"][self.stage]["resources"]["batch_system"]
 
     @property
+    def resources(self) -> Dict[str, int]:
+        """
+        luigi resources of this branch. A local branch runs one program on the node powgatory runs
+        on and takes one of the local_cores there (job_settings.local_parallel_tasks, see cli.py).
+        A Slurm branch takes none.
+        """
+        if self.batch_system == "local":
+            return {"local_cores": 1}
+        else:
+            return {}
+
+    @property
     def slurm_settings(self) -> Dict[str, Any]:
         """
         b2luigi setting, i.e. overwrite of b2luigi.set_setting("slurm_settings", <value>) for this task.
@@ -749,6 +761,10 @@ class POWHEGStage(POWHEGBaseTask):
             # script's own job (run_program.sh execs the program), since "exec" is a shell
             # builtin and subprocess.run() does not go through a shell.
             cmd = []
+
+        if self.batch_system == "local":
+            # Inherited by apptainer and by the program that run_program.sh execs.
+            cmd = ["nice", "-n", str(self.config["job_settings"]["local_niceness"])] + cmd
 
         log_file = self._powheg_log_file()
 

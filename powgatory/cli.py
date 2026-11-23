@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 import b2luigi
+import luigi.configuration
 from b2luigi.batch.processes.slurm import SlurmProcess
 
 from .config import POWHEGConfig
@@ -91,6 +92,36 @@ def lock_run_directories(run_dirs):
             print(f"Warning: could not lock {lock_path} ({e}); a second POWgatory in {run_dir} would not be noticed.")
         lock_files.append(lock_file)
     return lock_files
+
+
+def free_cores() -> int:
+    """
+    The cores of this node that are free now and that this process may use, at least 1.
+
+    The cores this process may use (a Slurm allocation, taskset, a cpuset) are capped by the node's
+    cores minus its load, since other users' processes on a shared node don't show in the former.
+    The 5-minute load average is used because the result is fixed for the whole run: a short spike
+    at startup (a compile, a script) hardly shows in it, while load that has lasted a few minutes does.
+    """
+    if hasattr(os, "sched_getaffinity"):
+        usable_cores = len(os.sched_getaffinity(0))
+    else:
+        usable_cores = os.cpu_count()  # macOS
+    idle_cores = os.cpu_count() - round(os.getloadavg()[1])
+    return max(1, min(usable_cores, idle_cores))
+
+
+def local_parallel_tasks(configs) -> int:
+    """
+    How many local branches run at the same time. All configs share one scheduler and one node, so
+    the smallest number any of them sets applies, and the free cores if all of them say auto.
+    """
+    numbers = [config["job_settings"]["local_parallel_tasks"] for config in configs
+               if config["job_settings"]["local_parallel_tasks"] != "auto"]
+    if numbers:
+        return min(numbers)
+    else:
+        return free_cores()
 
 
 def user_template_paths() -> list:
@@ -202,8 +233,8 @@ Examples:
     parser.add_argument(
         '--workers',
         type=int,
-        default=250,
-        help='Number of parallel b2luigi workers (concurrently submitted/running jobs) to use.'
+        default=None,
+        help='Number of parallel b2luigi workers (concurrently submitted/running jobs); overrides job_settings.workers.'
     )
 
     return parser
@@ -273,6 +304,20 @@ def run_workflow():
             print()
         b2luigi_args.append('--dry-run')  # Pass dry-run to b2luigi
 
+    # The configs share one b2luigi worker, so the smallest number applies.
+    if args.workers is not None:
+        workers = args.workers
+    else:
+        workers = min(config["job_settings"]["workers"] for config in configs)
+
+    # Each local branch takes one of the local_cores (POWHEGStage.resources); luigi's scheduler
+    # starts a local branch only while one is free. The number is kept out of the config dict,
+    # whose hash is part of every task ID, because it differs from node to node.
+    if "--batch-runner" not in b2luigi_args:
+        local_cores = local_parallel_tasks(configs)
+        print(f"Local branches: at most {local_cores} at a time, workers: {workers}")
+        luigi.configuration.get_config().set("resources", "local_cores", str(local_cores))
+
     # Update sys.argv for b2luigi, removing our custom arguments
     sys.argv = b2luigi_args
 
@@ -289,6 +334,6 @@ def run_workflow():
         workflow = POWHEGWorkflow(version=program_version, config=config_dict)
 
     # Run tasks using b2luigi with ignore_additional_command_line_args=True
-    b2luigi.process(workflow, workers=args.workers, ignore_additional_command_line_args=True, dry_run=args.dry_run)
+    b2luigi.process(workflow, workers=workers, ignore_additional_command_line_args=True, dry_run=args.dry_run)
 
     return 0

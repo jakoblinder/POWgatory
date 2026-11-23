@@ -16,6 +16,27 @@ from pathlib import Path
 from .config import POWHEGConfig
 
 
+class SharedDictParameter(b2luigi.DictParameter):
+    """
+    A DictParameter whose equal values share one frozen dict and one serialized string per process.
+
+    luigi freezes a new copy of the dict for every task, and the scheduler keeps a JSON string of it
+    per task. With thousands of branches per config, and many configs in one POWgatory, those copies
+    fill the memory. The caches are keyed by the JSON text, which is what the task ID is computed
+    from: FrozenOrderedDict compares equal regardless of the key order, the JSON does not.
+    """
+    _frozen_by_text = {}
+    _shared_texts   = {}
+
+    def normalize(self, value):
+        frozen = super().normalize(value)
+        return self._frozen_by_text.setdefault(super().serialize(frozen), frozen)
+
+    def serialize(self, value):
+        text = super().serialize(value)
+        return self._shared_texts.setdefault(text, text)
+
+
 class Task(b2luigi.Task):
     """
     Base task class for all POWHEG tasks.
@@ -91,10 +112,10 @@ class POWHEGBaseTask(Task):
         description="Grid iteration number (1, 2, 3, ...)"
     )
 
-    config = b2luigi.DictParameter(hashed=True,
-                                   default={},
-                                   description="POWHEG configuration dictionary",
-                                  )
+    config = SharedDictParameter(hashed=True,
+                                 default={},
+                                 description="POWHEG configuration dictionary",
+                                )
 
     @property
     def retry_count(self) -> int:
@@ -335,10 +356,10 @@ class POWHEGWrapperTask(b2luigi.WrapperTask):
         hashed=True
     )
 
-    config = b2luigi.DictParameter(hashed=True,
-                                   default={},
-                                   description="POWHEG configuration dictionary"
-                                  )
+    config = SharedDictParameter(hashed=True,
+                                 default={},
+                                 description="POWHEG configuration dictionary"
+                                )
 
     @staticmethod
     def get_stage_str(stage_number: int) -> str:

@@ -257,6 +257,9 @@ job_settings:
   retries: 3                        # resubmissions of a branch whose Slurm job was lost, stuck in COMPLETING, or hung
   completing_grace: 900             # seconds a job may stay COMPLETING without the branch's outputs
   hung_start_minutes: 15            # a running job without POWHEG output after this long is hung (0 = never)
+  workers: 250                      # jobs b2luigi keeps running at once (see Batch submission details); --workers overrides it
+  local_parallel_tasks: auto        # local branches running at once; auto: cores free at startup (5-minute load average)
+  local_niceness: 0                 # niceness (0-19) of the programs of local branches, as for nice -n
 
 stages:
   stage1:
@@ -281,8 +284,9 @@ stages:
     merge_method: 1
 
 resources:                          # applies to every stage unless overridden per stage (see below)
-  batch_system: slurm                # "local" (GNU-parallel-style subprocess execution) or "slurm"
+  batch_system: slurm                # "local" (processes on the node powgatory runs on) or "slurm"
   submission_type: array             # Slurm only: "single", "array", or "mpi"
+  max_grouping_size: auto            # seeds per submission; auto: Slurm's MaxArraySize (see Batch submission details)
   partition: alma
   ntasks: 1                          # seeds run in parallel (array jobs) or MPI tasks (mpi jobs)
   time: "24:00:00"
@@ -319,7 +323,7 @@ stages:
 
 Further notes:
 
-- `batch_system: local` ignores `partition` and runs each branch as a local subprocess instead of submitting to Slurm (useful for testing without cluster access).
+- `batch_system: local` ignores `partition` and runs each branch as a local subprocess instead of submitting to Slurm (useful for testing without cluster access, or for the grid combination `stage3_fullgrid`). At most `job_settings.local_parallel_tasks` local branches run at the same time, across all stages and configs of one POWgatory. With `auto`, this is the number of cores free when POWgatory starts: the cores the process may use, but at most the node's cores minus its 5-minute load average. Right after a previous local run, its processes still count in that average, so set a number then. `job_settings.local_niceness` runs the POWHEG and analysis programs of local branches with that niceness, so that other processes on a busy node go first.
 - `container_image` accepts a registry URL (pulled once into `<run_dir>/powheg.sif` via `apptainer pull`), a local file path (copied into the run directory, or used in place with `copy_container_image: false`), or an empty string to run without a container.
 - The config file also defines an `addweights` stage. **It is a configuration placeholder only** — see [Known limitations](#known-limitations).
 
@@ -329,13 +333,15 @@ Per-stage Slurm behavior is controlled by `resources.submission_type`:
 
 - **`single`** — one independent `sbatch` submission per branch.
 - **`array`** — all branches for a stage submitted as one Slurm job array.
+
+`resources.max_grouping_size` sets how many branches go into one submission (one job array, one MPI job, or one batch of `single` submissions). `auto` takes Slurm's `MaxArraySize` from `scontrol show config`, the most elements a job array may have. A stage with `submission_type: mpi` needs a number. Set it in the top-level `resources` block: luigi takes one value for all of stages 1-4 and `stage3_fullgrid` (one task family), from the first of their tasks it sees, so a per-stage value may not take effect.
 - **`mpi`** — all branches submitted as a single multi-node Slurm job, dispatched via `srun`/`$SLURM_PROCID`. Sizing information (nodes, CPUs, memory, time limit) for the stage's partition is queried live from `sinfo` at config-load time (not hand-maintained per-cluster config files) and exposed via `POWHEGStage.partition_info`.
 
 `POWHEGConfig` also uses this live `sinfo` data to warn (not fail) if a stage's requested `resources.time` exceeds its partition's actual Slurm time limit.
 
 Job submission is deliberately throttled: `cli.py` monkey-patches b2luigi's `SlurmProcess.start_job` to enforce a minimum interval between `sbatch` calls, to avoid overwhelming the scheduler when submitting large numbers of jobs.
 
-Use `--workers` to control how many jobs b2luigi keeps submitted/running concurrently (default 250) — this replaced an earlier per-cluster `max_parallel_jobs` setting.
+`job_settings.workers` (default 250; `--workers` overrides it) sets how many jobs b2luigi keeps submitted/running concurrently — this replaced an earlier per-cluster `max_parallel_jobs` setting. A grouped Slurm submission takes one of them for all its branches, pending or running, while each local branch and each local helper task takes one. With several configs, the smallest `workers` and `local_parallel_tasks` of them apply. Local branches waiting for one of the `local_parallel_tasks` cores take no worker.
 
 ### Stuck, lost and failed jobs
 
@@ -376,7 +382,7 @@ powgatory --show-defaults
 
 Options:
   -c, --config_file FILE [FILE ...]   Path to one or more run.yaml files (required)
-  --workers N                         Number of parallel b2luigi workers (default: 250)
+  --workers N                         Number of parallel b2luigi workers (overrides job_settings.workers, default 250)
   --dry-run                           Print what would be submitted, without submitting
   -v, --verbose                       Print the resolved configuration file path(s)
   --version                           Print the installed version and exit

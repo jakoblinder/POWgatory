@@ -57,8 +57,12 @@ A branch counts as done when its output files exist and are non-empty, not by ex
    weight correction of the analyses needs `ubexcess_correct 1`.
 5. `powgatory -c run.yaml --dry-run` validates the config (executables, partitions from `sinfo`,
    time limits) and lists what would run.
-6. `powgatory -c run.yaml` starts the run. `--workers N` limits the number of jobs submitted or
-   running at the same time (default 250). Several configs: `powgatory -c a.yaml b.yaml`.
+6. `powgatory -c run.yaml` starts the run. `job_settings.workers` (default 250, overridden by
+   `--workers N`) limits the number of jobs submitted or running at the same time; a grouped Slurm
+   submission counts once. `job_settings.local_parallel_tasks` limits the local branches running at
+   the same time (`auto`: cores free at startup), `job_settings.local_niceness` their niceness (0-19). `resources.max_grouping_size: auto` (default)
+   puts up to Slurm's `MaxArraySize` seeds into one job array; `mpi` stages need a number. Several
+   configs: `powgatory -c a.yaml b.yaml`; they share these limits (the smallest value applies).
 
 ## Grid combination before stage 3
 
