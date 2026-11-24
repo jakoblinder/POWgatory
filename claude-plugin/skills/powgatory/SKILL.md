@@ -69,7 +69,7 @@ A branch counts as done when its output files exist and are non-empty, not by ex
    Stage 2 writes the NLO histograms `pwg-<seed>-NLO.top` only with `testplots 1`; the upper bound
    weight correction of the analyses needs `ubexcess_correct 1`.
 5. `powgatory -c run.yaml --dry-run` validates the config (executables, partitions from `sinfo`,
-   time limits) and lists what would run.
+   time limits, memory per node) and lists what would run.
 6. `powgatory -c run.yaml` starts the run. Several configs: `powgatory -c a.yaml b.yaml ...`
    (hundreds work); they share the limits below, and the smallest value applies.
    - `job_settings.workers` (default 250, `--workers N` overrides it): jobs submitted or running
@@ -77,8 +77,10 @@ A branch counts as done when its output files exist and are non-empty, not by ex
    - `job_settings.local_parallel_tasks` (`auto`: cores free at startup) and
      `job_settings.local_niceness` (0-19): local branches running at the same time, and their
      niceness.
-   - `resources.max_grouping_size: auto` (default): up to Slurm's `MaxArraySize` seeds in one job
-     array; `mpi` stages need a number.
+   - `resources.max_grouping_size: auto` (default): the largest job array or MPI job all Slurm
+     stages can submit (Viper: 1000 array elements; `mpi` on `general` 128 nodes x 128 seeds).
+   - `mem` (default 3500) is MB per seed; an `mpi` job requests it times the seeds per node. More
+     than the partition's largest node has, or than its `MaxMemPerNode`, is an error.
 
 ## Grid combination before stage 3
 

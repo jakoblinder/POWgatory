@@ -23,7 +23,10 @@ import yaml
 
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapperTask
-from .config import POWHEGConfig, ANALYSIS_STAGES, NO_MERGE, slurm_max_array_size, slurm_partitions
+from .config import (
+    POWHEGConfig, ANALYSIS_STAGES, NO_MERGE, auto_grouping_size, slurm_partitions, slurm_submissions,
+    slurm_tasks_per_node,
+)
 from .merge import METHOD_NAMES, merge_histograms
 from .ub_correction import correction_factors
 
@@ -305,15 +308,16 @@ class POWHEGStage(POWHEGBaseTask):
         as configured per stage (resources.max_grouping_size).
 
         auto stays in the config and is resolved here: only luigi's worker in the main process reads
-        this, once per task family, so batch jobs never query Slurm for it. Every auto in a process
-        gets the same value, since luigi uses the value of the first task of a family for all of them.
+        this, once per task family, so batch jobs never query Slurm for it. luigi uses the value of the
+        first task of a family for all of them, so auto is the same for every stage of a config: the
+        largest job array or MPI job that all its Slurm stages can submit (auto_grouping_size).
 
         Returns:
             The maximum number of tasks to group together.
         """
         max_grouping_size = self.config["stages"][self.stage]["resources"]["max_grouping_size"]
         if max_grouping_size == "auto":
-            return slurm_max_array_size()
+            return auto_grouping_size(slurm_submissions(self.config))
         else:
             return int(max_grouping_size)
 
@@ -330,8 +334,8 @@ class POWHEGStage(POWHEGBaseTask):
     @property
     def partition_info(self) -> Dict[str, Any]:
         """
-        sinfo-derived info (node count, CPUs and memory per node, time limit, ...) for this stage's
-        partition, used to size MPI jobs. sinfo is queried once per process, by the process that
+        Slurm's info (node count, CPUs, cores and memory per node, time limit, ...) for this stage's
+        partition, used to size MPI jobs. Slurm is queried once per process, by the process that
         reads this, i.e. the one that submits; it is not part of the config (see slurm_partitions).
         """
         partition = self.config["stages"][self.stage]["resources"]["partition"]
@@ -340,10 +344,11 @@ class POWHEGStage(POWHEGBaseTask):
     @property
     def tasks_per_node(self) -> int:
         """
-        b2luigi setting for submission_type mpi: how many seeds an MPI job runs per node, the CPUs per
-        node of the stage's partition. b2luigi requests ceil(seeds / tasks_per_node) nodes.
+        b2luigi setting for submission_type mpi: how many seeds an MPI job runs per node, the cores or
+        CPUs per node of the stage's partition (slurm_tasks_per_node). b2luigi requests
+        ceil(seeds / tasks_per_node) nodes.
         """
-        return self.partition_info["cpus"]
+        return slurm_tasks_per_node(self.partition_info)
 
     @property
     def task_cmd_additional_args(self) -> List[str]:

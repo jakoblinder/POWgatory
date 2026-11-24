@@ -132,15 +132,17 @@ resources:
   batch_system: slurm                 # Batch system: local or slurm
                                       # local runs the branches as processes on the node powgatory runs on.
   submission_type: array              # Slurm submission type: single, array, or mpi
-  # Maximum number of seeds grouped into one job submission (one job array for submission_type array).
-  # auto: Slurm's MaxArraySize, the most elements a job array may have (scontrol show config).
-  # Set it in this top-level block: stages 1-4 and stage3_fullgrid share one value. A stage with
-  # submission_type mpi needs a number.
-  max_grouping_size: auto  # FIXME: Add grouping for mpi jobs.
+  # Maximum number of seeds grouped into one job submission (one job array or MPI job).
+  # auto: the largest group every enabled Slurm stage can submit, the smallest of
+  #   - array: the most elements of a job array (MaxArraySize, or max_array_tasks if lower);
+  #   - mpi: the most nodes of a job on the stage's partition x seeds per node (Viper: 128 x 128).
+  # Set it in this top-level block: stages 1-4 and stage3_fullgrid share one value.
+  max_grouping_size: auto
   partition: alma
   ntasks: 1                           # Number of seeds to run in parallel (array jobs) or number of MPI tasks (mpi jobs)
   time: "24:00:00"
-  mem: 4000                           # MB per seed; for mpi multiplied by the seeds per node (--mem is per node)
+  mem: 3500                           # MB per seed; for mpi multiplied by the seeds per node (--mem is per node).
+                                      # A job needing more than any node of the partition has, or than it allows, is an error.
 
 # ================================================================================
 # POWHEG PARAMETERS (override powheg.input-save defaults)

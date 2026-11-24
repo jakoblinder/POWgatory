@@ -5,11 +5,13 @@ POWHEG-BOX b2luigi workflow configuration manager
 """
 from pathlib import Path
 import functools
+import math
+import re
 import shutil
 import yaml
 import sys
 import subprocess
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from .merge import METHOD_NAMES
 from .grid_contributions import grid_contributions
@@ -28,42 +30,154 @@ NO_MERGE = 0
 @functools.cache
 def slurm_partitions() -> Dict[str, Dict[str, Any]]:
     """
-    The number of nodes, the CPUs and memory per node, and the time limit of every partition, from
-    sinfo. It is not stored in the config: batch jobs rebuild the config to find their task ID and
-    would otherwise each have to query sinfo again, and get exactly the same answer.
+    The nodes and limits of every partition, from sinfo and `scontrol show partition`:
+    - nodes: the number of nodes; max_job_nodes: the most nodes one job may have (MaxNodes, at
+      most the number of nodes);
+    - cpus, cores: the CPUs (hardware threads) and cores per node, the smallest of its nodes;
+    - min_memory, max_memory: the memory of its smallest and largest node in MB;
+    - max_mem_per_node: the partition's MaxMemPerNode in MB, None if unlimited;
+    - time_limit: as sinfo prints it.
+    With --exact, sinfo prints one row per node configuration, instead of lower bounds marked with
+    "+" for nodes that differ. It is not stored in the config: batch jobs rebuild the config to find
+    their task ID and would otherwise each have to query Slurm again, and get exactly the same answer.
     """
-    output = subprocess.check_output(["sinfo", "--noheader", "-o", "%P %D %c %z %m %l"]).decode()
+    output = subprocess.check_output(["sinfo", "--exact", "--noheader", "-o", "%P %D %c %z %m %l %s"]).decode()
 
     partitions: Dict[str, Dict[str, Any]] = {}
+    job_sizes: Dict[str, str] = {}
     for line in output.strip().splitlines():
-        partition, nodes, cpus, sct, memory, time_limit = line.split()
+        partition, nodes, cpus, sct, memory, time_limit, job_size = line.split()
         partition = partition.rstrip("*")  # sinfo marks the default partition with "*"
-        cpus = cpus.rstrip("+")  # sinfo marks a lower-bound value with "+" when grouped nodes' CPU counts differ
-                                 # Note that this is a delicate situation and can cause problems.
-        entry = partitions.setdefault(
-            partition,
-            {"nodes": 0, "cpus": int(cpus), "sct": sct, "memory": memory, "time_limit": time_limit},
-        )
-        entry["nodes"] += int(nodes)  # sinfo lists one row per node state within a partition
+        sockets, cores_per_socket, _ = (int(field.rstrip("+")) for field in sct.split(":"))
+        cpus, cores, memory = int(cpus.rstrip("+")), sockets * cores_per_socket, int(memory.rstrip("+"))
+        entry = partitions.setdefault(partition, {
+            "nodes": 0, "cpus": cpus, "cores": cores, "min_memory": memory, "max_memory": memory,
+            "max_mem_per_node": None, "time_limit": time_limit,
+        })
+        entry["nodes"]     += int(nodes)  # one row per node configuration (and state) of the partition
+        entry["cpus"]       = min(entry["cpus"], cpus)
+        entry["cores"]      = min(entry["cores"], cores)
+        entry["min_memory"] = min(entry["min_memory"], memory)
+        entry["max_memory"] = max(entry["max_memory"], memory)
+        job_sizes[partition] = job_size  # e.g. "1-128", "1" or "1-infinite", the same in every row
+
+    for partition, entry in partitions.items():
+        max_nodes = job_sizes[partition].rpartition("-")[2]
+        entry["max_job_nodes"] = min(int(max_nodes), entry["nodes"]) if max_nodes.isdigit() else entry["nodes"]
+
+    # sinfo does not print MaxMemPerNode (e.g. Viper's shared partition small: half a node)
+    if shutil.which("scontrol") is not None:
+        output = subprocess.check_output(["scontrol", "--oneliner", "show", "partition"]).decode()
+        for line in output.splitlines():
+            settings = dict(re.findall(r"(\S+?)=(\S*)", line))
+            max_mem_per_node = settings.get("MaxMemPerNode", "UNLIMITED")
+            if settings.get("PartitionName") in partitions and max_mem_per_node.isdigit():
+                partitions[settings["PartitionName"]]["max_mem_per_node"] = int(max_mem_per_node)
 
     return partitions
 
 
 @functools.cache
+def slurm_config() -> Dict[str, str]:
+    """`scontrol show config` as a dict of strings, or {} where there is no Slurm."""
+    if shutil.which("scontrol") is None:
+        return {}
+    output = subprocess.check_output(["scontrol", "show", "config"]).decode()
+    return {key.strip(): value.strip() for key, sep, value in (line.partition("=") for line in output.splitlines()) if sep}
+
+
 def slurm_max_array_size() -> int:
     """
-    Slurm's MaxArraySize from `scontrol show config`, or 1 where there is no Slurm (local branches
-    are never grouped). Job array indices run from 0 to MaxArraySize - 1, and b2luigi numbers the
-    elements from 0, so a job array can have MaxArraySize elements.
+    The most elements a job array may have, or 1 where there is no Slurm (local branches are never
+    grouped). Job array indices run from 0 to MaxArraySize - 1, and b2luigi numbers the elements
+    from 0, so a job array can have MaxArraySize elements, unless max_array_tasks in
+    SchedulerParameters is lower (Viper: MaxArraySize 30001, max_array_tasks 1000).
     """
-    if shutil.which("scontrol") is None:
+    settings = slurm_config()
+    if not settings:
         return 1
+    max_array_size = int(settings["MaxArraySize"])
+    for parameter in settings.get("SchedulerParameters", "").split(","):
+        name, _, value = parameter.partition("=")
+        if name.strip() == "max_array_tasks" and value.strip().isdigit():
+            max_array_size = min(max_array_size, int(value))
+    return max_array_size
+
+
+def slurm_tasks_per_node(partition_info: Dict[str, Any]) -> int:
+    """
+    The most seeds an MPI job runs on one node of a partition (partition_info from
+    slurm_partitions()): one per core where Slurm starts at most one task per core
+    (CR_ONE_TASK_PER_CORE in SelectTypeParameters, as on Viper, where 256 tasks on a node of 128
+    cores are refused), else one per CPU. MaxTasksPerNode only caps it: it limits what srun starts,
+    not what the hardware has.
+    """
+    settings = slurm_config()
+    if "CR_ONE_TASK_PER_CORE" in settings.get("SelectTypeParameters", "").upper():
+        tasks_per_node = partition_info["cores"]
     else:
-        output   = subprocess.check_output(["scontrol", "show", "config"]).decode()
-        settings = {key.strip(): value.strip() for key, _, value in (line.partition("=") for line in output.splitlines())}
-        max_array_size = int(settings["MaxArraySize"])
-        print(f"max_grouping_size: auto -> {max_array_size} (Slurm's MaxArraySize)")
-        return max_array_size
+        tasks_per_node = partition_info["cpus"]
+    max_tasks_per_node = settings.get("MaxTasksPerNode", "")
+    if max_tasks_per_node.isdigit():
+        tasks_per_node = min(tasks_per_node, int(max_tasks_per_node))
+    return tasks_per_node
+
+
+def slurm_max_mpi_size(partition: str) -> int:
+    """The most seeds of one MPI job on a partition: its most nodes per job x seeds per node."""
+    partition_info = slurm_partitions()[partition]
+    return partition_info["max_job_nodes"] * slurm_tasks_per_node(partition_info)
+
+
+def slurm_submissions(config) -> Tuple[Tuple[str, str], ...]:
+    """The (submission_type, partition) pairs of a config's enabled Slurm stages, sorted."""
+    return tuple(sorted({
+        (stage["resources"]["submission_type"], stage["resources"]["partition"])
+        for stage in config["stages"].values()
+        if stage["enabled"] and stage["resources"]["batch_system"] == "slurm"
+    }))
+
+
+@functools.cache
+def auto_grouping_size(submissions: Tuple[Tuple[str, str], ...]) -> int:
+    """
+    max_grouping_size auto for the (submission_type, partition) pairs of a config's Slurm stages
+    (slurm_submissions()): the largest group every one of them can submit as one job, i.e. the
+    smallest of the largest job array and the largest MPI job of each partition. luigi takes one
+    group size per task family, from its first task, so all stages need the same value. A single
+    stage submits one job per seed and has no limit; without any limit, auto is the largest job
+    array, as before there were MPI stages. Printed once per value.
+    """
+    limits = {}
+    for submission_type, partition in submissions:
+        if submission_type == "array":
+            limits["elements of a job array"] = slurm_max_array_size()
+        elif submission_type == "mpi":
+            partition_info = slurm_partitions()[partition]
+            tasks_per_node = slurm_tasks_per_node(partition_info)
+            limits[f"mpi on {partition}: {partition_info['max_job_nodes']} nodes x {tasks_per_node} seeds per node"] = (
+                partition_info["max_job_nodes"] * tasks_per_node
+            )
+    if not limits:
+        limits["elements of a job array"] = slurm_max_array_size()
+
+    reason, value = min(limits.items(), key=lambda limit: limit[1])
+    if slurm_config():
+        print(f"max_grouping_size: auto -> {value} ({reason})")
+    return value
+
+
+def slurm_memory_mb(mem: Any) -> Optional[int]:
+    """mem as sbatch --mem takes it (MB, or a number with the unit K, M, G or T) in MB, None otherwise."""
+    if isinstance(mem, bool):
+        return None
+    if isinstance(mem, int):
+        return mem
+    match = re.fullmatch(r"\s*(\d+)\s*([KMGT]?)B?\s*", str(mem), flags=re.IGNORECASE)
+    if match is None:
+        return None
+    factor = {"K": 1 / 1024, "": 1, "M": 1, "G": 1024, "T": 1024 ** 2}[match.group(2).upper()]
+    return math.ceil(int(match.group(1)) * factor)
 
 
 class POWHEGConfig:
@@ -339,21 +453,6 @@ class POWHEGConfig:
         if local_parallel_tasks != "auto" and (not isinstance(local_parallel_tasks, int) or local_parallel_tasks < 1):
             raise ValueError(f"ERROR: job_settings.local_parallel_tasks is {local_parallel_tasks!r}, expected a positive number or auto.")
 
-        # max_grouping_size: auto becomes Slurm's MaxArraySize (POWHEGStage.max_grouping_size), but an
-        # MPI job runs all seeds of its group at the same time, so its size has to be chosen.
-        mpi_stages = [
-            stage_name for stage_name, stage_config in stages.items()
-            if stage_config['enabled']
-            and stage_config['resources']['batch_system'] == 'slurm'
-            and stage_config['resources']['submission_type'] == 'mpi'
-            and stage_config['resources']['max_grouping_size'] == 'auto'
-        ]
-        if mpi_stages:
-            raise ValueError(
-                f"ERROR: Stage {', '.join(mpi_stages)} has submission_type mpi and max_grouping_size auto, which "
-                f"would put up to Slurm's MaxArraySize seeds into one MPI job. Set max_grouping_size to a number."
-            )
-
         # A user without privileges can only raise the niceness.
         local_niceness = self['job_settings']['local_niceness']
         if not isinstance(local_niceness, int) or not 0 <= local_niceness <= 19:
@@ -392,11 +491,24 @@ class POWHEGConfig:
             if stage_config['enabled'] and stage_config['resources']['batch_system'] == 'slurm'
         ]
 
+    def stage_seed_count(self, stage_name: str) -> int:
+        """
+        The most seeds a stage runs (tasks.stage_seeds): stage 4's for the analysis stages, one per
+        contribution for stage3_fullgrid, else its ntasks.
+        """
+        if stage_name in ANALYSIS_STAGES:
+            return self['stages']['stage4']['resources']['ntasks']
+        elif stage_name == 'stage3_fullgrid' and isinstance(self['stages'][stage_name]['contributions'], int):
+            return self['stages'][stage_name]['contributions']
+        else:
+            return self['stages'][stage_name]['resources']['ntasks']
+
     def validate_partitions(self, partitions: Dict[str, Dict[str, Any]]) -> List[str]:
         """
-        Check every enabled Slurm stage against the partitions from sinfo (slurm_partitions()): the
-        partition has to exist, and the time limit and, for mpi, the memory of a full node should fit.
-        Only the process that starts the run calls this, so that batch jobs don't query sinfo.
+        Check every enabled Slurm stage against the partitions (slurm_partitions()): the partition
+        has to exist, the time limit should fit, a job must not request more memory per node than a
+        node of the partition has or the partition allows, and an mpi group should fit into one job.
+        Only the process that starts the run calls this, so that batch jobs don't query Slurm.
 
         Returns:
             List of warning messages (empty if all valid)
@@ -423,15 +535,51 @@ class POWHEGConfig:
                     f"'{partition}' limit {partition_info['time_limit']}"
                 )
 
-            if resources['submission_type'] == 'mpi':
-                # sinfo marks a lower bound with "+" when the nodes of a partition differ.
-                node_memory      = int(partition_info['memory'].rstrip('+'))
-                full_node_memory = resources['mem'] * partition_info['cpus']
-                if full_node_memory > node_memory:
+            # The largest group of the stage. auto is at least a full node of seeds, unless the
+            # stage has fewer (see auto_grouping_size).
+            group_size = self.stage_seed_count(stage_name)
+            if resources['max_grouping_size'] != 'auto':
+                group_size = min(group_size, int(resources['max_grouping_size']))
+            tasks_per_node = slurm_tasks_per_node(partition_info)
+
+            # Memory per node: a single or array job runs one seed, an MPI job up to tasks_per_node
+            # seeds per node, each with mem (POWHEGStage.slurm_settings).
+            mem = slurm_memory_mb(resources['mem'])
+            if mem is not None:
+                if resources['submission_type'] == 'mpi':
+                    seeds_per_node = min(group_size, tasks_per_node)
+                    node_memory    = mem * seeds_per_node
+                    request        = f"mem {resources['mem']} MB x {seeds_per_node} seeds = {node_memory} MB per node"
+                else:
+                    node_memory = mem
+                    request     = f"mem {mem} MB"
+                memory_limits = [partition_info['max_memory']]
+                if partition_info['max_mem_per_node'] is not None:
+                    memory_limits.append(partition_info['max_mem_per_node'])
+                if node_memory > min(memory_limits):
+                    raise ValueError(
+                        f"ERROR: Stage {stage_name} requests {request}, but partition '{partition}' has nodes "
+                        f"with at most {partition_info['max_memory']} MB"
+                        + (f" and allows at most {partition_info['max_mem_per_node']} MB per node"
+                           if partition_info['max_mem_per_node'] is not None else "")
+                        + ", so the job never starts. Lower mem."
+                    )
+                elif node_memory > partition_info['min_memory']:
                     warnings.append(
-                        f"WARNING: Stage {stage_name} (mpi) requests mem {resources['mem']} MB x {partition_info['cpus']} "
-                        f"seeds = {full_node_memory} MB on a full node, but a node of partition '{partition}' has "
-                        f"{node_memory} MB, so such a job never starts."
+                        f"WARNING: Stage {stage_name} requests {request}, more than the {partition_info['min_memory']} MB "
+                        f"of the smallest nodes of partition '{partition}', so it runs only on the nodes with more "
+                        f"memory: fewer nodes, a longer wait, and clusters may allow fewer of them per job "
+                        f"(Viper: at most 64)."
+                    )
+
+            if resources['submission_type'] == 'mpi':
+                max_mpi_size = partition_info['max_job_nodes'] * tasks_per_node
+                if group_size > max_mpi_size:
+                    warnings.append(
+                        f"WARNING: Stage {stage_name} (mpi) groups up to {group_size} seeds (max_grouping_size), but a job "
+                        f"on partition '{partition}' has at most {partition_info['max_job_nodes']} nodes x "
+                        f"{tasks_per_node} seeds = {max_mpi_size} seeds, so sbatch refuses the job. Set "
+                        f"max_grouping_size to auto or at most {max_mpi_size}."
                     )
 
         return warnings

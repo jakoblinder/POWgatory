@@ -135,11 +135,11 @@ powheg_parameters:                  # values that replace those in powheg.input-
 
 - `array` (default): one job array per stage.
 - `single`: one `sbatch` per seed.
-- `mpi`: one multi-node job, one seed per CPU (`srun`). It packs as many seeds onto a node as the stage's partition has CPUs per node, and requests `mem` (per seed) times the seeds per node, since `--mem` counts per node.
+- `mpi`: one multi-node job, one seed per task (`srun`). It packs one seed per core onto a node where Slurm starts one task per core (`CR_ONE_TASK_PER_CORE`, as on Viper: 128 per node), else one per CPU, and requests `mem` (per seed) times the seeds per node, since `--mem` counts per node.
 
-`resources.max_grouping_size` is the most seeds per submission. `auto` (default) is Slurm's `MaxArraySize`; an `mpi` stage needs a number. Set it in the top-level `resources`: stages 1–4 and `stage3_fullgrid` share one value (luigi takes it from the first of their tasks), so a per-stage value may not take effect.
+`resources.max_grouping_size` is the most seeds per submission. `auto` (default) is the largest group every enabled Slurm stage can submit: for `array` the most elements of a job array (`MaxArraySize`, or `max_array_tasks` in `SchedulerParameters` if lower; Viper: 1000), for `mpi` the most nodes of a job on the stage's partition times the seeds per node (Viper `general`: 128 × 128 = 16384). Set it in the top-level `resources`: stages 1–4 and `stage3_fullgrid` share one value (luigi takes it from the first of their tasks), so a per-stage value may not take effect, and `auto` is the smallest of the stages' limits.
 
-At startup, POWgatory checks every Slurm stage against `sinfo`: an unknown partition is an error; a `time` above the partition's limit, or an `mpi` stage whose `mem` × CPUs per node exceeds a node's memory, is a warning. `sbatch` calls are at least 2 s apart.
+At startup, POWgatory checks every Slurm stage against `sinfo` and `scontrol show partition`: an unknown partition is an error, and so is a job that needs more memory per node (`mem`, for `mpi` times the seeds per node) than the partition's largest node has or than its `MaxMemPerNode` allows. A `time` above the partition's limit, more memory per node than its smallest nodes have, or an `mpi` group larger than a job may be is a warning. The default `mem` is 3500 MB per seed, so that 128 seeds fit a normal Viper node (480000 MB). `sbatch` calls are at least 2 s apart.
 
 **Limits.** `job_settings.workers` (default 250, `--workers` overrides it) is the number of jobs b2luigi keeps submitted or running at once. A grouped Slurm submission counts once for all its seeds, pending or running; each local seed and each short local helper task counts once.
 

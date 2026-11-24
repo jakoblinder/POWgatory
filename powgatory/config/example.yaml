@@ -45,7 +45,7 @@ resources:
   submission_type: array
   ntasks: 10                        # Seeds run in parallel
   time: "24:00:00"
-  mem: 4000
+  mem: 3500                         # MB per seed
 
 # Override values in powheg.input-save, for every stage
 powheg_parameters:
