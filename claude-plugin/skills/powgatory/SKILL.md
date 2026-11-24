@@ -128,6 +128,11 @@ user mentions fullgrid files or grid combination:
   `p1-x2-s7` (stage 1, grid iteration 2, seed 7), `p4-s12`, `stage3_fullgrid-s1`, `lhef-s3`.
   `<run_dir>/logs/<job_code>/stdout` and `stderr`: the batch job's output.
 - `<run_dir>/incomplete_run_backups/`: files of earlier failed or interrupted attempts.
+- `<run_dir>/run_backups/<timestamp>/`: earlier runs, moved aside by `powgatory -c run.yaml --clean`.
+  `--clean` moves everything in `run_dir` but `powheg.sif` there (and a `log_dir` outside it), so the
+  next run starts from stage 1; `--clean --dry-run` lists what would be moved. Like starting a run,
+  only clean with the user's agreement. A POWgatory stopped with Ctrl-C has cancelled its jobs; after
+  any other end (`kill`, a dropped SSH session) check `squeue` and `scancel` that run's jobs first.
 
 ## When something fails
 

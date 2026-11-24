@@ -8,6 +8,7 @@ Usage:
     powgatory -c config.yaml                          # Run full workflow
     powgatory -c config1.yaml config2.yaml            # Run multiple workflows
     powgatory -c config.yaml --dry-run                # Show what would be done
+    powgatory -c config.yaml --clean                  # Move the previous run aside and exit
     powgatory --init                                  # Write a run.yaml to start from
     powgatory --save-template my.yaml                 # Make my.yaml the template for --init
     powgatory --show-defaults                         # Print all options with their defaults
@@ -22,7 +23,9 @@ import shutil
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import b2luigi
 import luigi.configuration
@@ -184,6 +187,62 @@ def save_template(source: Path):
     print(f"Saved {source} as the template for powgatory --init: {template}")
 
 
+# --clean moves the previous run into <run_dir>/run_backups/<timestamp>/. The container image is an
+# input, not a result, and copying or pulling it again takes long; earlier backups stay where they are.
+RUN_BACKUP_DIR = "run_backups"
+KEPT_ON_CLEAN  = {"powheg.sif", RUN_BACKUP_DIR}
+
+
+def clean_run_directory(config, dry_run: bool = False):
+    """
+    Move everything in config's run_dir except KEPT_ON_CLEAN into a new directory
+    <run_dir>/run_backups/<timestamp>/, so that the next run starts from stage 1. A log_dir outside
+    the run_dir is emptied into <backup>/logs/. Nothing is deleted. With dry_run, only print what
+    would be moved.
+    """
+    run_dir = Path(config["job_settings"]["run_dir"])
+    log_dir = Path(config["job_settings"]["log_dir"])
+
+    # Empty directories hold nothing of the previous run; POWHEGConfig has just created log_dir again.
+    entries = [entry for entry in sorted(run_dir.iterdir())
+               if entry.name not in KEPT_ON_CLEAN and not (entry.is_dir() and not entry.is_symlink() and not any(entry.iterdir()))]
+    # Compared resolved, since the config keeps symlinks in its paths (/u is /viper/u1 on Viper).
+    log_dir_outside = not log_dir.resolve().is_relative_to(run_dir.resolve())
+    log_entries     = sorted(log_dir.iterdir()) if log_dir_outside and log_dir.is_dir() else []
+
+    if not entries and not log_entries:
+        print(f"Nothing to clean in {run_dir}")
+        return
+
+    timestamp  = datetime.now(ZoneInfo("Europe/Berlin")).strftime("%Y%m%dT%H%M%S")
+    backup_dir = run_dir / RUN_BACKUP_DIR / timestamp
+    suffix     = 1
+    while backup_dir.exists():
+        suffix    += 1
+        backup_dir = run_dir / RUN_BACKUP_DIR / f"{timestamp}-{suffix}"
+
+    if dry_run:
+        print(f"Would move from {run_dir} to {backup_dir}:")
+        for entry in entries:
+            print(f"  {entry.name}")
+        if log_entries:
+            print(f"Would move from {log_dir} to {backup_dir / 'logs'}:")
+            for entry in log_entries:
+                print(f"  {entry.name}")
+        return
+
+    backup_dir.mkdir(parents=True)
+    # Within the run_dir a rename suffices; a log_dir elsewhere can be on another filesystem.
+    for entry in entries:
+        entry.rename(backup_dir / entry.name)
+    if log_entries:
+        (backup_dir / "logs").mkdir()
+        for entry in log_entries:
+            shutil.move(entry, backup_dir / "logs" / entry.name)
+
+    print(f"Moved {len(entries) + len(log_entries)} entries of the previous run to {backup_dir}")
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser."""
     parser = argparse.ArgumentParser(
@@ -194,7 +253,8 @@ def create_parser() -> argparse.ArgumentParser:
 Examples:
   powgatory -c config.yaml                      Run full workflow
   powgatory -c config.yaml --dry-run            Show what would be done
-  powgatory --init                              Write run.yaml to start a new run from
+  powgatory -c config.yaml --clean              Move the previous run aside to start a new one
+  powgatory --init                            Write run.yaml to start a new run from
   powgatory --save-template my.yaml             Use my.yaml as the template for --init
   powgatory --show-defaults                     Print all options with their defaults
 
@@ -216,6 +276,13 @@ Examples:
         '--dry-run',
         action='store_true',
         help='Show what would be done without executing'
+    )
+
+    parser.add_argument(
+        '--clean',
+        action='store_true',
+        help=f'Move the files of the previous run in each run_dir (all but powheg.sif) into '
+             f'<run_dir>/{RUN_BACKUP_DIR}/<timestamp>/ and exit; with --dry-run only list them'
     )
 
     parser.add_argument(
@@ -292,6 +359,15 @@ def run_workflow():
         parser.error("the following arguments are required: -c/--config_file")
 
     configs = [POWHEGConfig.from_yaml(config_file) for config_file in config_files]
+
+    # Cleaning needs neither the executables nor sinfo, only that no POWgatory runs in the run_dir.
+    if args.clean:
+        if not args.dry_run:
+            run_dir_locks = lock_run_directories(config["job_settings"]["run_dir"] for config in configs)
+        for config in configs:
+            clean_run_directory(config, dry_run=args.dry_run)
+        return 0
+
     for config in configs:
         config.validate_run_directory()
 

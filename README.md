@@ -249,6 +249,7 @@ Options:
   -c, --config_file FILE [FILE ...]   One or more run.yaml files
   --workers N                         Jobs b2luigi keeps running at once (overrides job_settings.workers)
   --dry-run                           Validate the config and show what would run, without running it
+  --clean                             Move the previous run in run_dir aside and exit (with --dry-run: only list it)
   -v, --verbose                       Print the configuration file path(s)
   --version                           Print the installed version and exit
   --init [FILE]                       Write a run config to start from into FILE (default: run.yaml) and exit
@@ -257,6 +258,8 @@ Options:
 ```
 
 Further arguments are passed on to b2luigi.
+
+`--clean` starts a run over from stage 1 without deleting anything: it moves everything in `run_dir` except `powheg.sif` into `run_dir/run_backups/<timestamp>/`, and the contents of a `log_dir` outside `run_dir` into its `logs/`. Earlier backups stay in `run_backups/`. It refuses while a POWgatory runs in the run directory. A POWgatory stopped with Ctrl-C cancels its Slurm jobs, but one that ended otherwise (`kill`, a dropped SSH session, `kill -9`) leaves them queued or running; they are not noticed and would write into the cleaned directory, so `scancel` them first. `--clean --dry-run` lists what would be moved.
 
 `--init` never overwrites a file. It copies the first template that exists: `$POWGATORY_TEMPLATE`, `~/.config/powgatory/template.yaml`, or the packaged `example.yaml`. A personal template holds what stays the same from run to run, such as `container_image` or `partition`. `--save-template` copies a file to the first of the two user locations, and asks before overwriting; the template may also be a symlink, e.g. into a dotfiles repository.
 
@@ -269,6 +272,7 @@ Inside `job_settings.run_dir`:
 - `logs/<job_code>/stdout`, `stderr`: the batch job's own output.
 - `timings.yaml`: run times per finished stage (shortest, longest, average, total).
 - `incomplete_run_backups/`: files of earlier failed or killed attempts.
+- `run_backups/<timestamp>/`: earlier runs, moved aside by `--clean`.
 - `ub_corrections.yaml`, `lhef/`, `pythia/`: see [Analysis stages](#analysis-stages); `pwg-mean-NLO.top`: see [Merging histograms](#merging-histograms).
 - `task_files/`: b2luigi's generated job scripts.
 
