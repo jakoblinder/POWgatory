@@ -6,6 +6,7 @@ POWHEG-BOX b2luigi workflow configuration manager
 from pathlib import Path
 import functools
 import math
+import os
 import re
 import shutil
 import yaml
@@ -21,6 +22,12 @@ ANALYSIS_STAGES = ("lhef", "pythia")
 
 # merge_method of a stage whose histogram files are not merged.
 NO_MERGE = 0
+
+# The environment of the Slurm jobs, as for sbatch --export: only PATH (and SLURM_*) from the
+# submitting shell, so that jobs find the programs it finds, e.g. apptainer from a module, without
+# inheriting the rest of its environment. Used for the submit file (POWHEGStage.slurm_settings) and
+# for SBATCH_EXPORT (cli.py), which sbatch would prefer over the submit file.
+SLURM_EXPORT = "PATH"
 
 # The Slurm queries below are cached, so that a POWgatory with many configs sends each of them
 # once: the Slurm controller limits the requests per user (rl_enable in SlurmctldParameters), and
@@ -207,15 +214,18 @@ class POWHEGConfig:
             self.config["python"] = Path(sys.executable)
 
 
-        # Make sure the executables, powheg_input_template, and powheg_seeds_template are absolute paths
+        # Make the paths absolute with os.path.abspath: it joins a relative path to the current
+        # directory and removes "." and ".." by name, but, unlike Path.resolve(), keeps symlinks, so
+        # that the paths stay as written. On Viper e.g. /u/<user> is a symlink to /viper/u1/<user>, and
+        # the container, which mounts the home directory as $HOME, only has the former.
         for key in ["powheg_executable", "lhef_executable", "pythia_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "cwd"]:
             if key in self.config:
-                self.config[key] = Path(self.config[key]).resolve()
+                self.config[key] = Path(os.path.abspath(self.config[key]))
 
-        # Output directories
+        # Output directories, the same way
         for key in ["run_dir", "log_dir"]:
             if key in self.config["job_settings"]:
-                self.config["job_settings"][key] = Path(self.config["job_settings"][key]).resolve()
+                self.config["job_settings"][key] = Path(os.path.abspath(self.config["job_settings"][key]))
 
         # Create directories
         self["job_settings"]["run_dir"].mkdir(exist_ok=True)
@@ -284,7 +294,7 @@ class POWHEGConfig:
         """Set default values for missing configuration keys."""
         # config/ and scripts/ ship inside the package, so they are found the same way
         # in a regular and in an editable install.
-        package_path = Path(__file__).parent.resolve()
+        package_path = Path(os.path.abspath(Path(__file__).parent))  # absolute, symlinks kept
         default_config_file = package_path / "config/config_default.yaml"
         with open(default_config_file, 'r') as f:
             config_dict = yaml.safe_load(f)
@@ -292,7 +302,7 @@ class POWHEGConfig:
 
         # Load default pwgseeds.dat-save from workflow config directory
         pwgseeds_default = package_path / "config/pwgseeds.dat-save"
-        config_dict['powheg_seeds_template'] = pwgseeds_default.resolve()
+        config_dict['powheg_seeds_template'] = pwgseeds_default
 
         config_dict['script_dir'] = package_path / "scripts"
 
@@ -343,6 +353,8 @@ class POWHEGConfig:
     @classmethod
     def from_yaml(cls, config_file: str) -> 'POWHEGConfig':
         """Create config instance from YAML file."""
+        # Resolved, unlike the other paths: framework.py makes it relative to cwd, which getcwd()
+        # always returns with the symlinks resolved.
         config_file = Path(config_file).resolve()
         try:
             with open(config_file, 'r') as f:

@@ -24,7 +24,7 @@ import yaml
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapperTask
 from .config import (
-    POWHEGConfig, ANALYSIS_STAGES, NO_MERGE, auto_grouping_size, slurm_partitions, slurm_submissions,
+    POWHEGConfig, ANALYSIS_STAGES, NO_MERGE, SLURM_EXPORT, auto_grouping_size, slurm_partitions, slurm_submissions,
     slurm_tasks_per_node,
 )
 from .merge import METHOD_NAMES, merge_histograms
@@ -494,7 +494,7 @@ class POWHEGStage(POWHEGBaseTask):
                 mem            = mem * seeds_per_node
 
             slurm_settings = {
-                "export": "NONE",
+                "export": SLURM_EXPORT,
                 "partition": partition,
                 "ntasks": cpus_per_task,
                 "mem": mem,
@@ -778,6 +778,32 @@ class POWHEGStage(POWHEGBaseTask):
 
         return backup_dir is not None
 
+    def _container_binds(self, program: str, working_dir: str) -> List[Path]:
+        """
+        The directories the container needs, each bound at its own path, since apptainer only
+        mounts the home directory: the directory powgatory was started from, the run and working
+        directory, POWgatory's package (scripts/run_program.sh, the default seeds template), the
+        program's directory, the directory of the seeds template (<run_dir>/pwgseeds.dat points at
+        it) and, for the analysis stages, those of the link_files. A directory inside another one of
+        them is left out.
+        """
+        directories = [
+            Path(self.config["cwd"]),
+            Path(self.config["job_settings"]["run_dir"]),
+            Path(working_dir),
+            Path(self.config["script_dir"]).parent,
+            Path(program).parent,
+            Path(self.config["powheg_seeds_template"]).parent,
+        ]
+        if self.stage in ANALYSIS_STAGES:
+            directories += [target.parent for target in link_file_targets(self.config, self.stage)]
+
+        binds = []
+        for directory in sorted(set(directories), key=lambda directory: len(directory.parts)):
+            if not any(directory.is_relative_to(bound) for bound in binds):
+                binds.append(directory)
+        return binds
+
     def _run_program(self, job_code: str, seed: int, program: str, apptainer_image: str, working_dir: str, event_file: str = ""):
         """
         Run program (pwhg_main, or an analysis program, which also gets an event file) for this
@@ -785,7 +811,8 @@ class POWHEGStage(POWHEGBaseTask):
         """
         if apptainer_image:
             self.publish_message(f"Running in container: {apptainer_image}")
-            cmd = ["apptainer", "exec", "--bind", f"{self.config['cwd']}:{self.config['cwd']}", str(apptainer_image)]
+            binds = [arg for directory in self._container_binds(program, working_dir) for arg in ("--bind", f"{directory}:{directory}")]
+            cmd   = ["apptainer", "exec", *binds, str(apptainer_image)]
         else:
             # No prefix: the job script is run directly. Process replacement is the
             # script's own job (run_program.sh execs the program), since "exec" is a shell
@@ -1047,6 +1074,23 @@ def histogram_weights(directory: Path, name: str) -> List[str]:
 ##########################################################
 
 
+def link_file_targets(config, stage: str) -> List[Path]:
+    """The files matched by a stage's link_files, relative to cwd or absolute, glob patterns allowed."""
+    targets = []
+    for pattern in config["stages"][stage]["link_files"]:
+        matches = sorted(glob.glob(str(Path(config["cwd"]) / pattern)))
+        if not matches:
+            raise FileNotFoundError(f"link_files of stage {stage}: {pattern} matches no file.")
+        targets += [Path(match) for match in matches]
+
+    names = [target.name for target in targets]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"link_files of stage {stage}: several files are named {', '.join(duplicates)}.")
+
+    return targets
+
+
 def stage4_seeds(config) -> range:
     """The seeds of stage 4, i.e. of the event files the analysis stages read."""
     return range(1, config["stages"]["stage4"]["resources"]["ntasks"] + 1)
@@ -1150,7 +1194,7 @@ class POWHEGAnalysisSetup(POWHEGStageSetup):
     def run(self):
         # Resolved first, so that a pattern without a match stops the setup before it writes its
         # outputs, which would otherwise count as complete in the next run.
-        link_targets = self._link_file_targets()
+        link_targets = link_file_targets(self.config, self.stage)
 
         run_dir   = Path(self.config["job_settings"]["run_dir"])
         stage_dir = run_dir / self.stage
@@ -1174,22 +1218,6 @@ class POWHEGAnalysisSetup(POWHEGStageSetup):
 
         for link_target in link_targets:
             self._link(stage_dir / link_target.name, link_target)
-
-    def _link_file_targets(self) -> List[Path]:
-        """The files matched by the stage's link_files, relative to cwd or absolute, glob patterns allowed."""
-        targets = []
-        for pattern in self.config["stages"][self.stage]["link_files"]:
-            matches = sorted(glob.glob(str(Path(self.config["cwd"]) / pattern)))
-            if not matches:
-                raise FileNotFoundError(f"link_files of stage {self.stage}: {pattern} matches no file.")
-            targets += [Path(match) for match in matches]
-
-        names = [target.name for target in targets]
-        duplicates = sorted({name for name in names if names.count(name) > 1})
-        if duplicates:
-            raise ValueError(f"link_files of stage {self.stage}: several files are named {', '.join(duplicates)}.")
-
-        return targets
 
     @staticmethod
     def _link(link: Path, target: Path):

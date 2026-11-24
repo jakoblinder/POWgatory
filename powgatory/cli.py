@@ -28,7 +28,7 @@ import b2luigi
 import luigi.configuration
 from b2luigi.batch.processes.slurm import SlurmProcess
 
-from .config import POWHEGConfig, slurm_partitions
+from .config import POWHEGConfig, SLURM_EXPORT, slurm_partitions
 from . import __version__
 
 # This block makes sure that jobs are scheduled with a 2 second wait.
@@ -359,6 +359,11 @@ def run_workflow():
 
     else:
         workflow = POWHEGWorkflow(version=program_version, config=config_dict)
+
+    # sbatch prefers SBATCH_EXPORT over the --export in the submit file (POWHEGStage.slurm_settings),
+    # and MPCDF sets SBATCH_EXPORT=NONE in every login shell (/mpcdf/modules/etc/startup.sh), so set
+    # it to the same value. Only this process's environment changes, which the sbatch calls inherit.
+    os.environ["SBATCH_EXPORT"] = SLURM_EXPORT
 
     # Run tasks using b2luigi with ignore_additional_command_line_args=True
     b2luigi.process(workflow, workers=workers, ignore_additional_command_line_args=True, dry_run=args.dry_run)

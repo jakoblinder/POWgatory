@@ -6,7 +6,7 @@ description: Set up, start, monitor and debug POWHEG-BOX runs with POWgatory (st
 # POWgatory
 
 POWgatory runs a POWHEG-BOX campaign from one `run.yaml`: it expands the stages into per-seed
-jobs (b2luigi), submits them as Slurm array jobs or runs them as local processes, and waits until
+jobs (b2luigi), submits them as Slurm job arrays or MPI jobs or runs them as local processes, and waits until
 each stage is done before starting the next one:
 
 stage 1 (`grid_iterations` iterations) → stage 2 → optional grid combination `stage3_fullgrid` →
@@ -58,20 +58,23 @@ A branch counts as done when its output files exist and are non-empty, not by ex
    - `job_settings.run_dir` (all outputs go there), `job_settings.container_image`
      (registry URL, local `.sif`, or `""`)
    - `stages.<stage>.enabled`, `stages.stage1.grid_iterations`
-   - `resources`: `batch_system` (`slurm` or `local`), `partition`, `ntasks` (number of seeds),
+   - `resources`: `batch_system` (`slurm` or `local`), `submission_type` (`array`, `single` or
+     `mpi`: one multi-node job, one seed per core), `partition`, `ntasks` (number of seeds),
      `time`, `mem`
    - `powheg_parameters`: values that override the template, e.g. `ncall1`, `ncall2`,
      `nubound`, `numevts`
    `resources` and `powheg_parameters` can be set at the top level and per stage
    (`stages.<stage>.resources`), merged key by key.
-4. The POWHEG input needs `manyseeds 1` (in the template or in `powheg_parameters`): POWgatory
+4. The POWHEG input needs `manyseeds 1`, which the default `powheg_parameters` set: POWgatory
    gives each branch its seed number. It sets `parallelstage` and `xgriditeration` itself.
    Stage 2 writes the NLO histograms `pwg-<seed>-NLO.top` only with `testplots 1`; the upper bound
    weight correction of the analyses needs `ubexcess_correct 1`.
 5. `powgatory -c run.yaml --dry-run` validates the config (executables, partitions from `sinfo`,
    time limits, memory per node) and lists what would run.
-6. `powgatory -c run.yaml` starts the run. Several configs: `powgatory -c a.yaml b.yaml ...`
-   (hundreds work); they share the limits below, and the smallest value applies.
+6. `powgatory -c run.yaml` starts the run, from a shell in which `apptainer` is on `PATH` if a
+   `container_image` is set (e.g. after `module load apptainer`): Slurm jobs get this shell's
+   `PATH` (`--export=PATH`). Several configs: `powgatory -c a.yaml b.yaml ...` (hundreds work);
+   they share the limits below, and the smallest value applies.
    - `job_settings.workers` (default 250, `--workers N` overrides it): jobs submitted or running
      at the same time; a grouped Slurm submission counts once.
    - `job_settings.local_parallel_tasks` (`auto`: cores free at startup) and
@@ -139,6 +142,14 @@ user mentions fullgrid files or grid combination:
 - `Stage ... uses partition '...', which sinfo does not report`: wrong partition name; the
   message lists the existing ones.
 - `Unknown submission_type '...'`: a typo in `submission_type` (`single`, `array` or `mpi`).
+- `Stage ... requests ... MB per node, but partition '...' has nodes with at most ... MB` (or
+  `allows at most ... MB per node`): lower `mem`; for `mpi` it is multiplied by the seeds per node.
+- Changed `powheg_parameters` (or template) have no effect on a stage whose
+  `<run_dir>/<stage_code>-powheg.input` already exists: it is written only once. Ask, then delete
+  it and `<run_dir>/symlinks_<stage>_grid<N>.done`; complete seeds keep their old results.
+- `No such file or directory: 'apptainer'` in `<run_dir>/logs/<job_code>/stderr`: jobs get the
+  `PATH` of the shell POWgatory was started from (`--export=PATH`). Load apptainer there (e.g.
+  `module load apptainer`) and start POWgatory again.
 - `Another POWgatory is already running in ...`: see Rules.
 
 The full documentation is the README at https://github.com/jakoblinder/POWgatory.

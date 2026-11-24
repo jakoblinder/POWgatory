@@ -124,7 +124,7 @@ stages:
 
 # ================================================================================
 # RESOURCE SETTINGS
-# Can be set globally or per stage. If set per stage, global settings are ignored.
+# Can be set globally or per stage. A stage takes every key it does not set itself from here.
 # ================================================================================
 # For local execution, only 'ntasks' is used (time/partition are ignored). How many local branches
 # run at the same time is set by job_settings.local_parallel_tasks.
@@ -146,9 +146,12 @@ resources:
 
 # ================================================================================
 # POWHEG PARAMETERS (override powheg.input-save defaults)
-# Can be set globally or per stage. If set per stage, global settings are ignored.
+# Can be set globally or per stage. A stage takes every key it does not set itself from here.
 # ================================================================================
 powheg_parameters:
+  # POWgatory runs every seed as a POWHEG run of its own, which reads its seed from pwgseeds.dat:
+  # needed by every stage, also with parallelstage (which POWgatory sets, as xgriditeration).
+  manyseeds: 1
   # Uncomment to override:
   # ncall1:  20000   # Grid optimization calls
   # ncall2:  20000   # Cross section calls

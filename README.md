@@ -81,7 +81,7 @@ stage 1, grid 1 → … → stage 1, grid N → stage 2 → [stage3_fullgrid] �
 ```
 
 - Each stage runs `ntasks` seeds in parallel and starts only when the previous stage is complete. Stage 1 runs `grid_iterations` times. Optional stages are in brackets: the [grid combination](#grid-combination) and the [analyses](#analysis-stages).
-- POWgatory writes each stage's `powheg.input` from your template with the stage's `powheg_parameters` (parameters missing in the template are appended), and sets `parallelstage` and `xgriditeration` itself. The input needs `manyseeds 1`.
+- POWgatory writes each stage's `powheg.input` from your template with the stage's `powheg_parameters` (parameters missing in the template are appended), and sets `parallelstage` and `xgriditeration` itself. `manyseeds 1`, which every seed's run needs, is in the default `powheg_parameters`.
 - A seed is complete when its POWHEG output files exist and are non-empty; the exit code is not used. Running `powgatory -c run.yaml` again therefore runs only what is incomplete. Seeds above 9999 (5-digit file names) work.
 - Before a seed runs again, leftovers of an earlier attempt are moved to `incomplete_run_backups/`, since POWHEG refuses to overwrite e.g. an event file. When POWHEG exits with an error, its outputs are moved there too (it writes its counters file also on failure).
 - A failed seed is not rerun automatically. Everything that does not depend on it still runs, and the summary at the end shows `:(`. Fix the cause and start POWgatory again.
@@ -121,7 +121,7 @@ resources:                          # every stage, unless the stage overrides a 
   partition: alma
   ntasks: 10                        # seeds per stage
   time: "24:00:00"
-  mem: 4000                         # MB per seed
+  mem: 3500                         # MB per seed
 
 powheg_parameters:                  # values that replace those in powheg.input-save, every stage
   # ncall1: 20000
@@ -145,11 +145,15 @@ At startup, POWgatory checks every Slurm stage against `sinfo` and `scontrol sho
 
 `batch_system: local` runs a stage's seeds as processes on the node POWgatory runs on. At most `job_settings.local_parallel_tasks` of them run at the same time, over all stages and configs; `auto` is the number of cores free at startup (the cores the process may use, at most the node's cores minus its 5-minute load average). Right after a previous local run, its processes still count in that average, so set a number then. `job_settings.local_niceness` (0–19) runs them with that niceness. A local seed waiting for a core takes no worker. With several configs, the smallest `workers` and `local_parallel_tasks` among them apply.
 
+**Job environment.** Slurm jobs are submitted with `--export=PATH`: they get the `PATH` of the shell POWgatory runs in, so they find the programs it finds (e.g. `apptainer` from a module loaded before starting POWgatory), and the rest from the login environment of the compute node. POWgatory sets `SBATCH_EXPORT` in its own environment to the same value, since `sbatch` would prefer it over the submit file (MPCDF sets `SBATCH_EXPORT=NONE` in every login shell).
+
 **Containers.** `job_settings.container_image` runs POWHEG and the analysis programs in Apptainer:
 
 - a registry URL (`oras://…`) is pulled once into `<run_dir>/powheg.sif` before any stage runs;
 - a local `.sif` is copied there, or used in place with `copy_container_image: false` (e.g. one image for many runs);
 - an existing `<run_dir>/powheg.sif` is reused; `""` runs without a container.
+
+Apptainer mounts only the home directory, under `$HOME`. POWgatory also binds, each at its own path, the directory it was started from, `run_dir`, its own package (`run_program.sh`, the default seeds template), the program's directory, the seeds template's directory and the analysis stages' `link_files` directories. Paths from the config are made absolute without resolving symlinks, so a path written as `/u/<user>/...` stays visible through the home mount even where `/u` is a symlink (Viper: to `/viper/u1`). Other files the programs read, e.g. PDF sets outside these directories, have to be under `$HOME`.
 
 **Stuck, lost and failed jobs.** For `single` and `array`, b2luigi checks the jobs at every status poll (every 2 minutes):
 
@@ -275,16 +279,19 @@ The lock file `.powgatory-run-dirs.lock` is in the directory that contains the r
 - **A seed fails with `pwhg_main failed: …` (or the analysis program's name) or `Output files … never appeared`**: read `logs/<job_code>.log`. Rerunning `powgatory` runs only the incomplete seeds.
 - **`task id … does not exist in the locally reproduced task graph`**: `run.yaml` or POWgatory changed while jobs were queued. Stop POWgatory and start it again; finished seeds stay done.
 - **`Stage … uses partition '…', which sinfo does not report`**: wrong partition name; the message lists the existing ones.
+- **`Stage … requests … MB per node, but partition '…' has nodes with at most … MB`** (or `allows at most … MB per node`): no node of the partition can run the job. Lower `mem`; for `mpi` it is multiplied by the seeds per node.
 - **`Another POWgatory is already running in …`**: one is still running on that run directory.
 - **`Unknown submission_type '…'`**: a typo in `submission_type`.
 - **A stage silently doesn't run**: read the warnings printed at startup (e.g. a stage enabled while the stage before it is disabled).
 - **`ModuleNotFoundError: No module named 'pkg_resources'`**: `luigi` 3.6.0 got installed, usually by updating `b2luigi` on its own. Reinstall POWgatory (see [Installation](#installation)).
 - **Container pull fails**: check that `apptainer` is on `PATH` and the registry is reachable.
+- **`No such file or directory: 'apptainer'`** in a job's `stderr`: `apptainer` was not on `PATH` in the shell POWgatory was started from. Load it there (e.g. `module load apptainer`) and start POWgatory again.
 
 ## Known limitations
 
 - The `addweights` stage is in the configuration but has no implementation; enabling it has no effect.
 - `lhef_analysis` writes its `.top` files every 20000 events, not only at the end. An analysis seed with more events that is killed during the run can leave files that count as complete; delete them to rerun that seed.
+- A stage's input file is written only once: `powheg_parameters` or a template changed later are not applied to a `run_dir` in which the stage's `<stage_code>-powheg.input` already exists. Delete it and `symlinks_<stage>_grid<N>.done` to have it written again; seeds that are already complete keep their results.
 - A job that hangs before POWgatory has moved an earlier attempt's log aside is not detected as hung, because that old log already shows POWHEG output. It runs into its time limit and the seed fails; `scancel` it and rerun `powgatory`.
 
 ## How it works
