@@ -33,6 +33,18 @@ A branch counts as done when its output files exist and are non-empty, not by ex
 - Each seed writes about 20 files per stage. GPFS file systems such as `/ptmp` limit the number of
   files per user; check the quota (`mmlsquota`) before campaigns with many seeds.
 
+## Installation
+
+- Check first: `powgatory --version`. Ask before installing or updating anything.
+- Install into a venv on a file system the batch nodes see (batch jobs use the same Python), with
+  Python 3.11-3.14: `pip install git+https://github.com/jakoblinder/POWgatory.git`. It brings the
+  b2luigi fork and the pinned luigi; never install `b2luigi` from PyPI, which silently ignores
+  `submission_type`.
+- Update: `pip install --force-reinstall git+https://github.com/jakoblinder/POWgatory.git`.
+  Always reinstall POWgatory, never `b2luigi` alone, and without `--no-deps`.
+- `No module named 'pkg_resources'`: luigi 3.6.0 got in; reinstall POWgatory as above.
+- Never while a campaign is running (see Rules).
+
 ## Starting a run
 
 1. The start directory holds the POWHEG executable (`pwhg_main`), the input template
@@ -58,12 +70,15 @@ A branch counts as done when its output files exist and are non-empty, not by ex
    weight correction of the analyses needs `ubexcess_correct 1`.
 5. `powgatory -c run.yaml --dry-run` validates the config (executables, partitions from `sinfo`,
    time limits) and lists what would run.
-6. `powgatory -c run.yaml` starts the run. `job_settings.workers` (default 250, overridden by
-   `--workers N`) limits the number of jobs submitted or running at the same time; a grouped Slurm
-   submission counts once. `job_settings.local_parallel_tasks` limits the local branches running at
-   the same time (`auto`: cores free at startup), `job_settings.local_niceness` their niceness (0-19). `resources.max_grouping_size: auto` (default)
-   puts up to Slurm's `MaxArraySize` seeds into one job array; `mpi` stages need a number. Several
-   configs: `powgatory -c a.yaml b.yaml`; they share these limits (the smallest value applies).
+6. `powgatory -c run.yaml` starts the run. Several configs: `powgatory -c a.yaml b.yaml ...`
+   (hundreds work); they share the limits below, and the smallest value applies.
+   - `job_settings.workers` (default 250, `--workers N` overrides it): jobs submitted or running
+     at the same time; a grouped Slurm submission counts once.
+   - `job_settings.local_parallel_tasks` (`auto`: cores free at startup) and
+     `job_settings.local_niceness` (0-19): local branches running at the same time, and their
+     niceness.
+   - `resources.max_grouping_size: auto` (default): up to Slurm's `MaxArraySize` seeds in one job
+     array; `mpi` stages need a number.
 
 ## Grid combination before stage 3
 
@@ -121,5 +136,7 @@ user mentions fullgrid files or grid combination:
   changed while jobs were queued. Stop POWgatory and start it again; finished branches stay done.
 - `Stage ... uses partition '...', which sinfo does not report`: wrong partition name; the
   message lists the existing ones.
+- `Unknown submission_type '...'`: a typo in `submission_type` (`single`, `array` or `mpi`).
+- `Another POWgatory is already running in ...`: see Rules.
 
 The full documentation is the README at https://github.com/jakoblinder/POWgatory.
