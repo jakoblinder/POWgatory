@@ -18,7 +18,7 @@ from .grid_contributions import grid_contributions
 ANALYSIS_STAGES = ("lhef", "pythia")
 
 # merge_method of a stage whose histogram files are not merged.
-NO_MERGE = -1
+NO_MERGE = 0
 
 # The Slurm queries below are cached, so that a POWgatory with many configs sends each of them
 # once: the Slurm controller limits the requests per user (rl_enable in SlurmctldParameters), and

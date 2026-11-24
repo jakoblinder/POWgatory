@@ -222,7 +222,7 @@ At the end, the histogram files (`.top`) of all seeds are merged, one file per w
 | 3 `sum` | Sum (e.g. born + virtual + real) |
 | 4 `max`, 5 `min` | Maximum or minimum, with its error |
 | 6 `sum-last` | Sum of all but the last set, minus the last set |
-| -1 | No merge for this stage |
+| 0 | No merge for this stage |
 
 The merged file has the method's name in place of the seed. Seeds without a file are left out with a warning; without any file (e.g. stage 2 without `testplots 1`) nothing is merged. Each merge is one job with its stage's `resources`; stage 2's runs while stage 3 runs.
 

@@ -108,7 +108,7 @@ user mentions fullgrid files or grid combination:
   `ub_btilde_corr`, `ub_remn_corr` from `pwgcounters-st4-<seed>.dat`) and `link_files` (further
   files the program needs).
 - `merge_method` per stage (`stage2`, `lhef`, `pythia`): 1 mean (default), 2 weighted with
-  1/error², 3 sum, 4 max, 5 min, 6 sum minus the last, -1 no merge. Results:
+  1/error², 3 sum, 4 max, 5 min, 6 sum minus the last, 0 no merge. Results:
   `pwg-mean-NLO.top`, `lhef/pwgLHEF_analysis-mean[-W<n>].top`,
   `pythia/pwgoutput_py8_histos-mean[-W<n>].top`.
 - By hand: `python -m powgatory.merge 1 files... -out merged.top` (like `mergedata`), and
