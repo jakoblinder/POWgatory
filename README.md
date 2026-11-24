@@ -95,6 +95,8 @@ stage 1, grid 1 → … → stage 1, grid N → stage 2 → [stage3_fullgrid] �
 ```yaml
 powheg_executable: "./pwhg_main"
 powheg_input_template: "powheg.input-save"
+lhef_executable: "./lhef_analysis"
+pythia_executable: "./main-PYTHIA82-lhef"
 
 job_settings:
   run_dir: "powheg_output"          # where POWHEG runs and writes its output
@@ -105,29 +107,46 @@ stages:
   stage1:
     enabled: true
     grid_iterations: 3
-    resources:
-      ntasks: 1                     # per-stage settings override the global ones, key by key
-    powheg_parameters:
-      ncall1: 500
   stage2:
     enabled: true
+  stage3_fullgrid:
+    enabled: false
+    resources:
+      batch_system: local
   stage3:
     enabled: true
   stage4:
     enabled: true
+  lhef:
+    enabled: false
+  pythia:
+    enabled: false
 
 resources:                          # every stage, unless the stage overrides a key
   batch_system: slurm               # slurm or local
   partition: alma
+  submission_type: array
   ntasks: 10                        # seeds per stage
   time: "24:00:00"
   mem: 3500                         # MB per seed
 
 powheg_parameters:                  # values that replace those in powheg.input-save, every stage
-  # ncall1: 20000
+  # ncall1:  20000
+  # ncall2:  20000
+  # nubound: 10000
+  # numevts:  1000
 ```
 
-`resources` and `powheg_parameters` can be set at the top level and per stage (`stages.<stage>.resources`, `stages.<stage>.powheg_parameters`). They are merged key by key: a stage that sets only `ntasks` keeps the top-level `partition`, `time` and so on. Paths are relative to the directory POWgatory is started from, or absolute.
+`resources` and `powheg_parameters` can be set at the top level and per stage (`stages.<stage>.resources`, `stages.<stage>.powheg_parameters`). They are merged key by key: a stage that sets only `ntasks` keeps the top-level `partition`, `time` and so on. Paths are relative to the directory POWgatory is started from, or absolute. For example:
+
+```yaml
+stages:
+  stage1:
+    resources:
+      ntasks: 1                     # per-stage settings override the global ones, key by key
+    powheg_parameters:
+      ncall1: 500
+```
 
 ## Slurm and local execution
 
