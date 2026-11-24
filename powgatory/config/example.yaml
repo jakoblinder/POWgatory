@@ -19,21 +19,12 @@ stages:
   stage1:
     enabled: true
     grid_iterations: 3
-    # Per-stage settings override the global ones below, key by key
-    resources:
-      ntasks: 1
-    powheg_parameters:
-      ncall1: 500
   stage2:
     enabled: true
-    # How the seeds' pwg-<seed>-NLO.top (with testplots 1) are merged into pwg-mean-NLO.top:
-    # 1 mean of equal statistics, 2 weighted with 1/error^2, -1 no merge
-    merge_method: 1
   # The first stage-3 seeds combine the grids, one per contribution (auto: read from the input),
   # as a stage of their own; e.g. locally on the login node, without a Slurm time limit
   stage3_fullgrid:
     enabled: false
-    contributions: auto
     resources:
       batch_system: local
   stage3:
@@ -44,15 +35,14 @@ stages:
   # upper bound weight correction; the histograms are merged per weight
   lhef:
     enabled: false
-    merge_method: 1
   pythia:
     enabled: false
-    merge_method: 1
 
 # Used by every stage, unless the stage overrides them
 resources:
   batch_system: slurm               # slurm or local
   partition: alma
+  submission_type: array
   ntasks: 10                        # Seeds run in parallel
   time: "24:00:00"
   mem: 4000
