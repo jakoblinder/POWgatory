@@ -27,8 +27,9 @@ A branch counts as done when its output files exist and are non-empty, not by ex
 - Do not edit `run.yaml` or update POWgatory while a campaign is running: the batch jobs rebuild
   the task graph from the config and the installed code, and must find the same tasks.
 - Never delete or overwrite a run directory, event files or results without asking.
-- POWgatory locks `<run_dir>/.powgatory.lock`, so a second process on the same run directory stops
-  at once ("Another POWgatory is already running ..."). Check for a running one instead.
+- POWgatory locks each run directory (one byte of `.powgatory-run-dirs.lock` in its parent
+  directory), so a second process on the same run directory stops at once ("Another POWgatory is
+  already running ..."). Check for a running one instead.
 - Each seed writes about 20 files per stage. GPFS file systems such as `/ptmp` limit the number of
   files per user; check the quota (`mmlsquota`) before campaigns with many seeds.
 

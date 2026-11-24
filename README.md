@@ -359,7 +359,7 @@ When POWHEG exits with an error, POWgatory moves the branch's output files to `i
 
 luigi's own retries are switched off. A run with a failed branch finishes everything that does not depend on it and ends with `:(`. After fixing the cause, rerun `powgatory`; it resubmits only the incomplete branches.
 
-Only one POWgatory can run per `run_dir`: a second one stops at once with a message. The lock (`<run_dir>/.powgatory.lock`) is released when the first one ends, also after a crash.
+Only one POWgatory can run per `run_dir`: a second one stops at once with a message, also when it is started from another directory or on another node. The lock is one byte of the file `.powgatory-run-dirs.lock` in the directory that contains the `run_dir`, so that the run directories of one parent share one open file (one lock file per run directory exceeded the open-file limit with hundreds of configs). It is released when the first one ends, also after a crash.
 
 ## Container support
 
@@ -436,7 +436,6 @@ Everything happens inside `job_settings.run_dir` (`powheg_output/` by default):
 - `logs/<job_code>/` — POWHEG stdout/stderr per branch, bracketed with `<Started-POWHEG:...>`/`<Finished-POWHEG:...>` markers that `POWHEGStageTimings` parses. The job code is e.g. `p1-x2-s7` (stage 1, grid iteration 2, seed 7), `p3-s12`, or `stage3_fullgrid-s1` for a seed of the grid combination.
 - `timings.yaml` — per-stage timing statistics (shortest/longest/average/total), updated as each stage completes.
 - `incomplete_run_backups/` — output files quarantined from a previous failed or killed attempt, or from a POWHEG run that exited with an error.
-- `.powgatory.lock` — held by the running POWgatory, so that a second one on the same `run_dir` stops.
 - `ub_corrections.yaml` — the upper bound correction factors of every stage-4 seed, if an analysis stage has `weight_correction: true`.
 - `lhef/`, `pythia/` — the analysis stages' `<seed>-powheg.input` files, links to the event files and `link_files`, the programs' outputs, and the merged histograms.
 - `pwg-mean-NLO.top` — the merged NLO histograms of stage 2 (see [Merging histograms](#merging-histograms)).

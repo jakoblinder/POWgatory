@@ -14,7 +14,9 @@ Usage:
 """
 
 import argparse
+import errno
 import fcntl
+import hashlib
 import os
 import shutil
 import sys
@@ -77,21 +79,39 @@ def lock_run_directories(run_dirs):
     Take an exclusive lock on every run directory, so that a second POWgatory on the same run
     directory stops instead of running every branch a second time next to the first one.
 
+    A run directory's lock is one byte of the file .powgatory-run-dirs.lock in its parent
+    directory, at an offset computed from its name (POSIX byte-range locks). The run directories
+    of one parent share one open file: a lock file per run directory needed an open file each,
+    and hundreds of configs exceeded the open-file limit of a login shell.
+
     The kernel releases the locks when this process ends, also after a crash. On GPFS (/ptmp) a
-    lock holds across nodes. The returned lock files must stay referenced to keep the locks.
+    lock holds across nodes. The returned lock files must stay referenced to keep the locks, and
+    nothing else may open them: closing any descriptor of the file releases all its locks.
     """
-    lock_files = []
-    for run_dir in sorted({Path(run_dir).resolve() for run_dir in run_dirs}):
-        lock_path = run_dir / ".powgatory.lock"
-        lock_file = open(lock_path, "w")
+    run_dirs   = sorted({Path(run_dir).resolve() for run_dir in run_dirs})
+    lock_files = {lock_dir: open_lock_file(lock_dir / ".powgatory-run-dirs.lock") for lock_dir in {run_dir.parent for run_dir in run_dirs}}
+
+    for run_dir, lock_file in ((run_dir, lock_files[run_dir.parent]) for run_dir in run_dirs if lock_files[run_dir.parent] is not None):
+        # Python's hash() differs from process to process, so the offset comes from sha256.
+        offset = int.from_bytes(hashlib.sha256(run_dir.name.encode()).digest()[:6], "big")
         try:
-            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            sys.exit(f"Another POWgatory is already running in {run_dir} (it holds {lock_path}).")
+            fcntl.lockf(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB, 1, offset)
         except OSError as e:
-            print(f"Warning: could not lock {lock_path} ({e}); a second POWgatory in {run_dir} would not be noticed.")
-        lock_files.append(lock_file)
-    return lock_files
+            if e.errno in (errno.EAGAIN, errno.EACCES):
+                sys.exit(f"Another POWgatory is already running in {run_dir} (it holds its lock in {lock_file.name}).")
+            else:
+                print(f"Warning: could not lock {run_dir} in {lock_file.name} ({e}); a second POWgatory in {run_dir} would not be noticed.")
+
+    return [lock_file for lock_file in lock_files.values() if lock_file is not None]
+
+
+def open_lock_file(lock_path):
+    """Open the lock file of the run directories in lock_path's directory, or None if that fails."""
+    try:
+        return open(lock_path, "a")
+    except OSError as e:
+        print(f"Warning: could not open {lock_path} ({e}); a second POWgatory in the run directories in {lock_path.parent} would not be noticed.")
+        return None
 
 
 def free_cores() -> int:

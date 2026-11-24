@@ -1,6 +1,6 @@
 {
   "name": "powgatory",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Set up, start and monitor POWHEG-BOX runs with POWgatory",
   "author": { "name": "Jakob Linder" },
   "repository": "https://github.com/jakoblinder/POWgatory"
