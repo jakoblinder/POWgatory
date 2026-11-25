@@ -168,6 +168,7 @@ class Task(b2luigi.Task):
         """
         return b2luigi.LocalTarget(self.local_path(*path))
 
+    @property
     def __name__(self):
         """
         Return the name of the task class. (Can be overridden for custom naming.)
