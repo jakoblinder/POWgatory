@@ -18,6 +18,7 @@ import argparse
 import errno
 import fcntl
 import hashlib
+import multiprocessing
 import os
 import shutil
 import sys
@@ -459,6 +460,13 @@ def run_workflow():
     # and MPCDF sets SBATCH_EXPORT=NONE in every login shell (/mpcdf/modules/etc/startup.sh), so set
     # it to the same value. Only this process's environment changes, which the sbatch calls inherit.
     os.environ["SBATCH_EXPORT"] = SLURM_EXPORT
+
+    # luigi hands its local scheduler, with the state of the whole task graph, to every task process.
+    # forkserver, the Linux default since Python 3.14, pickles it for each task start (~30 s per task
+    # with 1700 configs, one after another); fork, the default up to 3.13, passes it on for free. The
+    # process has no threads besides luigi's keep-alive thread, so fork is safe. macOS keeps spawn.
+    if sys.platform == "linux":
+        multiprocessing.set_start_method("fork")
 
     # Run tasks using b2luigi with ignore_additional_command_line_args=True
     b2luigi.process(workflow, workers=workers, ignore_additional_command_line_args=True, dry_run=args.dry_run)
