@@ -89,8 +89,16 @@ def slurm_config() -> Dict[str, str]:
     """`scontrol show config` as a dict of strings, or {} where there is no Slurm."""
     if shutil.which("scontrol") is None:
         return {}
-    output = subprocess.check_output(["scontrol", "show", "config"]).decode()
-    return {key.strip(): value.strip() for key, sep, value in (line.partition("=") for line in output.splitlines()) if sep}
+    # scontrol ends the output with a ping of the controller and exits with 1 if the ping fails,
+    # e.g. while the controller is busy, although the configuration before it is complete. So the
+    # output counts if it has every setting POWgatory reads (slurm_max_array_size,
+    # slurm_tasks_per_node); scontrol prints each of them, as "(null)" if it is not set.
+    result = subprocess.run(["scontrol", "show", "config"], capture_output=True, text=True)
+    settings = {key.strip(): value.strip() for key, sep, value in (line.partition("=") for line in result.stdout.splitlines()) if sep}
+    missing = [key for key in ("MaxArraySize", "MaxTasksPerNode", "SchedulerParameters", "SelectTypeParameters") if key not in settings]
+    if missing:
+        raise RuntimeError(f"ERROR: 'scontrol show config' (exit code {result.returncode}) did not report {', '.join(missing)}: {result.stderr.strip()}")
+    return settings
 
 
 def slurm_max_array_size() -> int:
