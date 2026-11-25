@@ -160,8 +160,12 @@ class POWHEGStageSetup(POWHEGBaseTask):
         with open(src_file, "r") as file:
             for line in file:
                 new_line = ""
+                # A line "<name> <value> ! <comment>": the keyword, the spacing (kept, so that the
+                # new value stays aligned), the value and an optional "!" comment. The value is a
+                # Fortran number like 1d0 or a Python %-format placeholder like %(parallelstage)s,
+                # which some templates have from scripts that filled them with "template % dict".
                 match = re.match(
-                    r"(?P<name>\w+)(?P<space>\s+)(?P<value>[\d\.\-d]+)(\s*\!\s*(?P<comment>.+))?",
+                    r"(?P<name>\w+)(?P<space>\s+)(?P<value>[\d\.\-d]+|%\(\w+\)\w)(\s*\!\s*(?P<comment>.+))?",
                     line
                 )
                 if match:
@@ -1207,7 +1211,11 @@ class POWHEGAnalysisSetup(POWHEGStageSetup):
             factors = {}
 
         for seed in stage4_seeds(self.config):
-            powheg_params = dict(self.config["stages"][self.stage]["powheg_parameters"])
+            # The values of stage 4, whose events the stage analyses: the analysis programs read
+            # their input with powheginput, which stops on a value it cannot parse, such as a
+            # placeholder %(parallelstage)s left in the template.
+            powheg_params = {'parallelstage': 4, 'xgriditeration': 1}
+            powheg_params.update(self.config["stages"][self.stage]["powheg_parameters"])
             powheg_params.update(factors.get(seed, {}))
             self.change_param(self.config["powheg_input_template"], stage_dir / f"{seed}-powheg.input", powheg_params)
 

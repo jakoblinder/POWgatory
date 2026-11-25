@@ -81,7 +81,7 @@ stage 1, grid 1 → … → stage 1, grid N → stage 2 → [stage3_fullgrid] �
 ```
 
 - Each stage runs `ntasks` seeds in parallel and starts only when the previous stage is complete. Stage 1 runs `grid_iterations` times. Optional stages are in brackets: the [grid combination](#grid-combination) and the [analyses](#analysis-stages).
-- POWgatory writes each stage's `powheg.input` from your template with the stage's `powheg_parameters` (parameters missing in the template are appended), and sets `parallelstage` and `xgriditeration` itself. `manyseeds 1`, which every seed's run needs, is in the default `powheg_parameters`.
+- POWgatory writes each stage's `powheg.input` from your template with the stage's `powheg_parameters` (parameters missing in the template are appended), and sets `parallelstage` and `xgriditeration` itself. Placeholders like `parallelstage %(parallelstage)s` in the template are replaced as well. `manyseeds 1`, which every seed's run needs, is in the default `powheg_parameters`.
 - A seed is complete when its POWHEG output files exist and are non-empty; the exit code is not used. Running `powgatory -c run.yaml` again therefore runs only what is incomplete. Seeds above 9999 (5-digit file names) work.
 - Before a seed runs again, leftovers of an earlier attempt are moved to `incomplete_run_backups/`, since POWHEG refuses to overwrite e.g. an event file. When POWHEG exits with an error, its outputs are moved there too (it writes its counters file also on failure).
 - A failed seed is not rerun automatically. Everything that does not depend on it still runs, and the summary at the end shows `:(`. Fix the cause and start POWgatory again.
