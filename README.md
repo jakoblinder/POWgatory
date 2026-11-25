@@ -320,7 +320,7 @@ The lock file `.powgatory-run-dirs.lock` is in the directory that contains the r
 - **`Stage … requests … MB per node, but partition '…' has nodes with at most … MB`** (or `allows at most … MB per node`): no node of the partition can run the job. Lower `mem`; for `mpi` it is multiplied by the seeds per node.
 - **`Another POWgatory is already running in …`**: one is still running on that run directory.
 - **`Unknown submission_type '…'`**: a typo in `submission_type`.
-- **`stages.lhef: the analyses lhef and pythia are set under analyses:`**: a config from before version 2.6; see the end of [Analyses](#analyses).
+- **`stages: has lhef, but the stages are …`**: a config from before version 2.6; see the end of [Analyses](#analyses).
 - **A stage silently doesn't run**: read the warnings printed at startup (e.g. a stage enabled while the stage before it is disabled).
 - **`ModuleNotFoundError: No module named 'pkg_resources'`**: `luigi` 3.6.0 got installed, usually by updating `b2luigi` on its own. Reinstall POWgatory (see [Installation](#installation)).
 - **Container pull fails**: check that `apptainer` is on `PATH` and the registry is reachable.

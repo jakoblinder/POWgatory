@@ -438,18 +438,6 @@ class POWHEGConfig:
         and that every analysis has a name usable as directory name, distinct from the stages, and
         every key in ANALYSIS_KEYS. Raises ValueError otherwise.
         """
-        moved = [f"stages.{name}" for name in ("lhef", "pythia") if name in self["stages"]]
-        moved += [key for key in ("lhef_executable", "pythia_executable") if key in self.config]
-        if moved:
-            raise ValueError(
-                f"ERROR: {', '.join(moved)}: the analyses lhef and pythia are set under analyses:, each with "
-                f"its executable, e.g.\n"
-                f"analyses:\n"
-                f"  lhef:\n"
-                f"    enabled: true\n"
-                f"    executable: ./lhef_analysis"
-            )
-
         unknown_stages = [name for name in self["stages"] if name not in stage_names]
         if unknown_stages:
             raise ValueError(

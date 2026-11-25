@@ -122,9 +122,9 @@ user mentions fullgrid files or grid combination:
   same `run_dir`: POWgatory refuses it, since it would run stages 1-4 again.
 - Adding an analysis to a finished run: add it to `run.yaml` and start POWgatory again; only
   the new analysis runs (with the user's agreement, as for any run).
-- `stages.lhef: the analyses lhef and pythia are set under analyses:`: a config from before
-  version 2.6. Move `stages.lhef`/`stages.pythia` under `analyses:`, with `executable` in place
-  of the top-level `lhef_executable`/`pythia_executable`.
+- `stages: has lhef, but the stages are ...`: a config from before version 2.6. Move
+  `stages.lhef`/`stages.pythia` under `analyses:`, with `executable` in place of the top-level
+  `lhef_executable`/`pythia_executable`, which are no longer read.
 - `merge_method` for `stage2` and per analysis: 1 mean (default), 2 weighted with 1/error², 3
   sum, 4 max, 5 min, 6 sum minus the last, 0 no merge; or a list, e.g. `[1, 4, 5]`, for one
   merged file per method (`-mean`, `-max`, `-min`). Results: `pwg-mean-NLO.top`, and the
