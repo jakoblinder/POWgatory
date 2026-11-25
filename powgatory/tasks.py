@@ -22,7 +22,7 @@ from typing import Dict, Any, List
 import yaml
 
 # Import our framework classes
-from .framework import POWHEGBaseTask, POWHEGWrapperTask, get_stage_str
+from .framework import POWHEGBaseTask, POWHEGWrapperTask, get_stage_str, short_repr, stage_code
 from .config import (
     POWHEGConfig, ANALYSIS_STAGES, SLURM_EXPORT, auto_grouping_size, slurm_partitions, slurm_submissions,
     slurm_tasks_per_node,
@@ -113,7 +113,7 @@ class POWHEGStageSetup(POWHEGBaseTask):
 
     def output(self):
         # The name create_powheg_input writes: e.g. p1-x2-powheg.input, or stage3_fullgrid-powheg.input.
-        return self.local_target(f"{self.stage_code(self.stage, self.grid_iteration)}-powheg.input")
+        return self.local_target(f"{stage_code(self.stage, self.grid_iteration)}-powheg.input")
 
     def run(self):
         """Create the input file."""
@@ -132,7 +132,7 @@ class POWHEGStageSetup(POWHEGBaseTask):
         """
         input_template = self.config['powheg_input_template']
 
-        input_file = self.local_path(f"{self.stage_code(stage, grid)}-powheg.input")
+        input_file = self.local_path(f"{stage_code(stage, grid)}-powheg.input")
 
         if grid <= 0 :
             grid = 1  # Default to 1 if not specified
@@ -256,7 +256,7 @@ class POWHEGCreateSymlinks(POWHEGBaseTask):
         else:
             self.publish_message(f"Creating symlinks for {stage}")
 
-        input_file = Path(self.local_path(f"{self.stage_code(stage, grid)}-powheg.input"))
+        input_file = Path(self.local_path(f"{stage_code(stage, grid)}-powheg.input"))
 
         self.publish_message(f"Creating symlink for powheg.input: {input_file}")
 
@@ -777,7 +777,7 @@ class POWHEGStage(POWHEGBaseTask):
             nonlocal backup_dir
             if backup_dir is None:
                 timestamp  = datetime.now(ZoneInfo('Europe/Berlin')).strftime("%Y%m%dT%H%M%SZ")
-                backup_dir = backup_root / f"{self.stage_code(self.stage, self.grid_iteration)}-s{self.branch_id}_{timestamp}"
+                backup_dir = backup_root / f"{stage_code(self.stage, self.grid_iteration)}-s{self.branch_id}_{timestamp}"
                 backup_dir.mkdir(parents=True, exist_ok=True)
             return backup_dir
 
@@ -929,7 +929,7 @@ class POWHEGStageTimings(POWHEGBaseTask):
 
     def _log_files(self) -> List[Path]:
         log_dir = Path(self.get_log_file_dir()).resolve()
-        log_prefix = f"{self.stage_code(self.stage, self.grid_iteration)}-"
+        log_prefix = f"{stage_code(self.stage, self.grid_iteration)}-"
         return sorted(log_dir.glob(f"{log_prefix}*.log"))
 
     @staticmethod
@@ -1149,9 +1149,17 @@ class POWHEGWeightCorrection(POWHEGBaseTask):
     """
     batch_system = "local"
 
+    # Inherited from POWHEGBaseTask, but unused: the task belongs to no stage.
+    stage          = b2luigi.Parameter(default="stage1", significant=False)
+    grid_iteration = b2luigi.IntParameter(default=1, significant=False)
+
     @property
     def stage_name(self) -> str:
         return "weight_correction"
+
+    def task_label(self) -> str:
+        """The label of the task ID: none, since the task has no stage of its own."""
+        return ""
 
     def requires(self):
         yield POWHEGStageTimings(stage=get_stage_str(4), version=self.version, config=self.config)
@@ -1249,7 +1257,7 @@ class POWHEGAnalysis(POWHEGStage):
     """
 
     def requires(self):
-        yield POWHEGAnalysisSetup(stage=self.stage, version=self.version, config=self.config)
+        yield POWHEGAnalysisSetup(stage=self.stage, grid_iteration=-1, version=self.version, config=self.config)
         # Depend on presubmit task, which sets up the container.
         yield POWHEGPresubmit(version=self.version, config=self.config)
 
@@ -1413,6 +1421,10 @@ class POWHEGStageWrapper(POWHEGWrapperTask):
                          description="Grid iteration number (1, 2, 3, ...)"
                      )
 
+    def task_label(self) -> str:
+        """The label of the task ID: the stage and grid iteration as in file names, e.g. p1-x2."""
+        return stage_code(self.stage, self.grid_iteration)
+
     def requires(self):
         if self.stage in ANALYSIS_STAGES:
             # One analysis run per stage-4 event file.
@@ -1478,6 +1490,10 @@ class POWHEGWorkflow(POWHEGWrapperTask):
 
 class POWHEGMultiConfigWorkflow(POWHEGWrapperTask):
     configuration_files = b2luigi.ListParameter(hashed=True, description="List of POWHEG configuration files to run.")
+
+    def __repr__(self):
+        """Without the list of files, which can have hundreds; each POWHEGWorkflow names its own."""
+        return short_repr(self, hidden=("configuration_files",))
 
     def requires(self):
         for config_file in self.configuration_files:

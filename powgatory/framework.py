@@ -38,6 +38,33 @@ def get_stage_str(stage_number: int) -> str:
     return f"stage{stage_number}"
 
 
+def stage_code(stage: str, grid: int = -1) -> str:
+    """
+    The short name of a stage in file names: p1-x2 for stage1 grid iteration 2, p3 for stage3,
+    the name itself for the other stages (e.g. lhef, stage3_fullgrid).
+    """
+    if stage.startswith("stage") and not stage.endswith("_fullgrid"):
+        if grid > 0:
+            return f"p{get_stage_number(stage)}-x{grid}"
+        else:
+            return f"p{get_stage_number(stage)}"
+    else:
+        return stage
+
+
+def readable_task_id(task: luigi.Task, label: str) -> str:
+    """
+    The task ID with label in place of luigi's summary of the parameters, which shows the first
+    16 characters of the first three parameters by name, e.g.
+    POWHEGStage__1__5__10__6__8____powheg_executa_1_34f94f46de. luigi's hash of all parameters
+    stays at the end and keeps the ID unique. Batch jobs find their task by this ID, so label may
+    depend on nothing but the parameters.
+    """
+    parameter_hash = task.task_id.rsplit("_", 1)[1]
+    parts          = [task.get_task_family(), TASK_ID_INVALID_CHAR_REGEX.sub("_", label), parameter_hash]
+    return "_".join(part for part in parts if part)
+
+
 def seed_runs(seeds: Iterable[int]) -> List[Tuple[int, int]]:
     """The seeds as runs of consecutive numbers (first, last): e.g. (1, 2, 3, 5) -> [(1, 3), (5, 5)]."""
     runs = []
@@ -47,6 +74,34 @@ def seed_runs(seeds: Iterable[int]) -> List[Tuple[int, int]]:
         else:
             runs.append((seed, seed))
     return runs
+
+
+def short_repr(task: luigi.Task, hidden: Iterable[str] = ()) -> str:
+    """
+    The task as e.g. POWHEGStage(stage=stage1, grid_iteration=2, config=run.yaml, branch_id=1-3,5),
+    for luigi's log lines: the config by its file, relative to the directory POWgatory started in,
+    instead of the whole dictionary. The grid iteration only for stage 1, the only stage with
+    several, no version, which POWgatory prints once at the start, and none of the parameters
+    in hidden, which the task does not use.
+    """
+    params = dict(task.get_params())
+    stage  = task.param_kwargs.get("stage")
+    repr_parts = []
+    for name, value in task.get_param_values(task.get_params(), [], task.param_kwargs):
+        if not params[name].significant or name == "version" or name in hidden or (name == "grid_iteration" and stage != "stage1"):
+            continue
+        elif name == "config" and not value:
+            continue  # POWHEGMultiConfigWorkflow has its configs in configuration_files
+        elif name == "config":
+            config_file = Path(value.get("config_file", "unknown_config.yaml")).relative_to(Path(value["cwd"]))
+            repr_parts.append(f"config={config_file}")
+        elif name == "branch_id" and isinstance(value, tuple):
+            runs = ",".join(f"{first}-{last}" if last > first else f"{first}" for first, last in seed_runs(value))
+            repr_parts.append(f"branch_id={runs}")
+        else:
+            repr_parts.append(f"{name}={params[name].serialize(value)}")
+
+    return f"{task.get_task_family()}({', '.join(repr_parts)})"
 
 
 class SharedDictParameter(b2luigi.DictParameter):
@@ -152,17 +207,11 @@ class POWHEGBaseTask(Task):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # luigi's task ID shows the first 16 characters of the first three parameters by name, e.g.
-        # POWHEGStage__1__5__10__6__8____powheg_executa_1_34f94f46de. Its hash of all parameters
-        # keeps the ID unique; put a readable label before it instead. Batch jobs find their task
-        # by this ID, so it may depend on nothing but the parameters.
-        parameter_hash = self.task_id.rsplit("_", 1)[1]
-        label          = TASK_ID_INVALID_CHAR_REGEX.sub("_", self.task_label())
-        self.task_id   = f"{self.get_task_family()}_{label}_{parameter_hash}"
+        self.task_id = readable_task_id(self, self.task_label())
 
     def task_label(self) -> str:
         """The label of the task ID: the stage and grid iteration as in file names, e.g. p1-x2."""
-        return self.stage_code(self.stage, self.grid_iteration)
+        return stage_code(self.stage, self.grid_iteration)
 
     @property
     def retry_count(self) -> int:
@@ -175,48 +224,7 @@ class POWHEGBaseTask(Task):
         return 1
 
     def __repr__(self):
-        """
-        Overwrite the default string representation of the task to not print the whole configuration.
-        Just print the name of the file instead.
-
-        Build a task representation like `MyTask(param1=1.5, param2='5', config_file='config.yaml')`.
-        """
-        params = self.get_params()
-        param_values = self.get_param_values(params, [], self.param_kwargs)
-
-        # Build up task id
-        repr_parts = []
-        param_objs = dict(params)
-        # Avoid printing of 'grid_iteration' parameter for stages != 1:
-        # grid_iteration_stage True for grid iteration stage.
-        grid_iteration_stage = False
-        for param_name, param_value in param_values:
-            if param_name == "stage" and param_value == "stage1":
-                grid_iteration_stage = True
-                break
-
-        for param_name, param_value in param_values:
-            if param_objs[param_name].significant:
-                if param_name == "config":
-                    # For the config parameter, just show the config file name instead of the whole dictionary
-                    config_file = Path(param_value.get("config_file", "unknown_config.yaml"))
-                    # Express the config file path relative to the current working directory for better readability
-                    config_file = config_file.relative_to(Path(self.config["cwd"]))
-                    repr_parts.append(f"{param_name:s}={str(config_file):s}")
-                elif param_name == "grid_iteration" and not grid_iteration_stage:
-                    continue
-                elif param_name == "version":
-                    continue  # Skip version in the representation, since its printed once at the beginning of the workflow
-                elif isinstance(param_value, tuple):
-                    # A group of seeds, e.g. branch_id=1-3,5,8-10
-                    runs = ",".join(f"{first}-{last}" if last > first else f"{first}" for first, last in seed_runs(param_value))
-                    repr_parts.append(f"{param_name:s}={runs:s}")
-                else:
-                    repr_parts.append(f"{param_name:s}={param_objs[param_name].serialize(param_value):s}")
-
-        task_str = f"{self.get_task_family()}({', '.join(repr_parts)})"
-
-        return task_str
+        return short_repr(self)
 
     def base_path(self, *path):
         """
@@ -314,25 +322,6 @@ class POWHEGBaseTask(Task):
         else:
             return f"s{seed}"
 
-    def stage_code(self, stage: str, grid: int = -1) -> str:
-        """
-        Generate unique stage identifier for job naming.
-
-        Args:
-            stage (str): Stage name (e.g., "stage1", "stage2", "stage3", "stage4", "addweights", "analysis").
-            grid (int): Grid iteration number (default: -1, meaning no grid iteration).
-        Returns:
-            str: Unique stage identifier (e.g., "p1-x1" for stage1 grid iteration 1).
-        """
-        if isinstance(stage, str) and stage.startswith("stage") and not stage.endswith("_fullgrid"):
-            # stage_number = int(stage.replace("stage", ""))
-            if grid > 0:
-                return f"p{get_stage_number(stage)}-x{grid}"
-            else:
-                return f"p{get_stage_number(stage)}"
-        else:
-            return f"{stage}"
-
     def job_code(self, stage: str, grid: int = -1, seed: int | tuple = 1) -> str:
         """
         Generate unique job identifier.
@@ -344,7 +333,7 @@ class POWHEGBaseTask(Task):
             str: Unique job identifier (e.g., "p1-x1-s1" for stage1 grid iteration 1 with seed 1,
                  or "p1-x1-s1to10" for a group).
         """
-        return f"{self.stage_code(stage, grid)}-{self.format_branch_id(seed)}"
+        return f"{stage_code(stage, grid)}-{self.format_branch_id(seed)}"
 
 
 class POWHEGWrapperTask(b2luigi.WrapperTask):
@@ -365,6 +354,17 @@ class POWHEGWrapperTask(b2luigi.WrapperTask):
                                  default={},
                                  description="POWHEG configuration dictionary"
                                 )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.task_id = readable_task_id(self, self.task_label())
+
+    def task_label(self) -> str:
+        """The label of the task ID: none, the class name says what the task does."""
+        return ""
+
+    def __repr__(self):
+        return short_repr(self)
 
     def get_config(self) -> POWHEGConfig:
         """
