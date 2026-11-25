@@ -6,8 +6,6 @@
 # POWHEG files, relative to the directory powgatory is started from
 powheg_executable: "./pwhg_main"
 powheg_input_template: "powheg.input-save"
-lhef_executable: "./lhef_analysis"          # For the stage lhef
-pythia_executable: "./main-PYTHIA82-lhef"   # For the stage pythia
 
 job_settings:
   run_dir: "powheg_output"          # Where POWHEG runs and writes its output
@@ -31,12 +29,16 @@ stages:
     enabled: true
   stage4:
     enabled: true
-  # Analysis of every stage-4 event file in <run_dir>/lhef/ and <run_dir>/pythia/, with the
-  # upper bound weight correction; the histograms are merged per weight
+
+# Analysis of every stage-4 event file in <run_dir>/<name>/, with the upper bound weight
+# correction; the histograms are merged per weight. Add more analyses under names of your own.
+analyses:
   lhef:
     enabled: false
+    executable: "./lhef_analysis"
   pythia:
     enabled: false
+    executable: "./main-PYTHIA82-lhef"
 
 # Used by every stage, unless the stage overrides them
 resources:

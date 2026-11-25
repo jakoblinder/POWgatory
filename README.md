@@ -13,7 +13,7 @@ POWgatory runs multi-stage [POWHEG-BOX](https://powhegbox.mib.infn.it/) campaign
 - [Configuration](#configuration)
 - [Slurm and local execution](#slurm-and-local-execution)
 - [Grid combination](#grid-combination)
-- [Analysis stages](#analysis-stages)
+- [Analyses](#analyses)
 - [Merging histograms](#merging-histograms)
 - [CLI reference](#cli-reference)
 - [Run directory layout](#run-directory-layout)
@@ -76,17 +76,17 @@ POWgatory has to keep running until the campaign is done, often for hours or day
 ## How a run proceeds
 
 ```
-stage 1, grid 1 → … → stage 1, grid N → stage 2 → [stage3_fullgrid] → stage 3 → stage 4 → [lhef] + [pythia]
-                                            └→ merge stage 2                                └→ merge lhef, pythia
+stage 1, grid 1 → … → stage 1, grid N → stage 2 → [stage3_fullgrid] → stage 3 → stage 4 → [analysis] + [analysis] + …
+                                            └→ merge stage 2                                └→ merge of each analysis
 ```
 
-- Each stage runs `ntasks` seeds in parallel and starts only when the previous stage is complete. Stage 1 runs `grid_iterations` times. Optional stages are in brackets: the [grid combination](#grid-combination) and the [analyses](#analysis-stages).
+- Each stage runs `ntasks` seeds in parallel and starts only when the previous stage is complete. Stage 1 runs `grid_iterations` times. Optional stages are in brackets: the [grid combination](#grid-combination) and the [analyses](#analyses), e.g. `lhef` and `pythia`.
 - POWgatory writes each stage's `powheg.input` from your template with the stage's `powheg_parameters` (parameters missing in the template are appended), and sets `parallelstage` and `xgriditeration` itself. Placeholders like `parallelstage %(parallelstage)s` in the template are replaced as well. `manyseeds 1`, which every seed's run needs, is in the default `powheg_parameters`.
 - A seed is complete when its POWHEG output files exist and are non-empty; the exit code is not used. Running `powgatory -c run.yaml` again therefore runs only what is incomplete. Seeds above 9999 (5-digit file names) work.
 - Before a seed runs again, leftovers of an earlier attempt are moved to `incomplete_run_backups/`, since POWHEG refuses to overwrite e.g. an event file. When POWHEG exits with an error, its outputs are moved there too (it writes its counters file also on failure).
 - A failed seed is not rerun automatically. Everything that does not depend on it still runs, and the summary at the end shows `:(`. Fix the cause and start POWgatory again.
 - Only one POWgatory can run per run directory: a second one stops at once ("Another POWgatory is already running …"), also when started from another directory or node. The lock is released when the first one ends, also after a crash.
-- `powgatory -c a.yaml b.yaml …` runs several independent configs in one process; hundreds work.
+- `powgatory -c a.yaml b.yaml …` runs several independent configs in one process; hundreds work. Each needs its own `run_dir`: to analyse one run in several ways, put the analyses into one config (see [Analyses](#analyses)).
 
 ## Configuration
 
@@ -95,8 +95,6 @@ stage 1, grid 1 → … → stage 1, grid N → stage 2 → [stage3_fullgrid] �
 ```yaml
 powheg_executable: "./pwhg_main"
 powheg_input_template: "powheg.input-save"
-lhef_executable: "./lhef_analysis"
-pythia_executable: "./main-PYTHIA82-lhef"
 
 job_settings:
   run_dir: "powheg_output"          # where POWHEG runs and writes its output
@@ -117,10 +115,14 @@ stages:
     enabled: true
   stage4:
     enabled: true
+
+analyses:                           # analyses of the stage-4 events, see Analyses
   lhef:
     enabled: false
+    executable: "./lhef_analysis"
   pythia:
     enabled: false
+    executable: "./main-PYTHIA82-lhef"
 
 resources:                          # every stage, unless the stage overrides a key
   batch_system: slurm               # slurm or local
@@ -137,7 +139,7 @@ powheg_parameters:                  # values that replace those in powheg.input-
   # numevts:  1000
 ```
 
-`resources` and `powheg_parameters` can be set at the top level and per stage (`stages.<stage>.resources`, `stages.<stage>.powheg_parameters`). They are merged key by key: a stage that sets only `ntasks` keeps the top-level `partition`, `time` and so on. Paths are relative to the directory POWgatory is started from, or absolute. For example:
+`resources` and `powheg_parameters` can be set at the top level and per stage or analysis (`stages.<stage>.resources`, `analyses.<name>.powheg_parameters`, …). They are merged key by key: a stage that sets only `ntasks` keeps the top-level `partition`, `time` and so on. Paths are relative to the directory POWgatory is started from, or absolute. For example:
 
 ```yaml
 stages:
@@ -172,7 +174,7 @@ At startup, POWgatory checks every Slurm stage against `sinfo` and `scontrol sho
 - a local `.sif` is copied there, or used in place with `copy_container_image: false` (e.g. one image for many runs);
 - an existing `<run_dir>/powheg.sif` is reused; `""` runs without a container.
 
-Apptainer mounts only the home directory, under `$HOME`. POWgatory also binds, each at its own path, the directory it was started from, `run_dir`, its own package (`run_program.sh`, the default seeds template), the program's directory, the seeds template's directory and the analysis stages' `link_files` directories. Paths from the config are made absolute without resolving symlinks, so a path written as `/u/<user>/...` stays visible through the home mount even where `/u` is a symlink (Viper: to `/viper/u1`). Other files the programs read, e.g. PDF sets outside these directories, have to be under `$HOME`.
+Apptainer mounts only the home directory, under `$HOME`. POWgatory also binds, each at its own path, the directory it was started from, `run_dir`, its own package (`run_program.sh`, the default seeds template), the program's directory, the seeds template's directory and the analyses' `link_files` directories. Paths from the config are made absolute without resolving symlinks, so a path written as `/u/<user>/...` stays visible through the home mount even where `/u` is a symlink (Viper: to `/viper/u1`). Other files the programs read, e.g. PDF sets outside these directories, have to be under `$HOME`.
 
 **Stuck, lost and failed jobs.** For `single` and `array`, b2luigi checks the jobs at every status poll (every 2 minutes):
 
@@ -205,38 +207,49 @@ stages:
 - Logs: `logs/stage3_fullgrid-s<seed>.log`; `timings.yaml` has an entry `stage3_fullgrid`.
 - While a seed combines a contribution, POWHEG holds `pwg-<contribution>-fullgrid.lock`. A killed seed leaves its lock behind and all other seeds wait for it; POWgatory moves the lock into `incomplete_run_backups/` when that seed runs again (also in stage 3). A lock whose seed is no longer part of the run, or an empty one (the seed was killed right after creating it), has to be deleted by hand, while no stage-3 job runs.
 
-## Analysis stages
+## Analyses
 
-`lhef` and `pythia` run `lhef_executable` (e.g. `lhef_analysis`) and `pythia_executable` (e.g. `main-PYTHIA82-lhef`) once per stage-4 seed, on its event file, each in its own directory `<run_dir>/lhef/` or `<run_dir>/pythia/`. They run in parallel after stage 4, with stage 4's `ntasks`; all other `resources` and the `powheg_parameters` can be set per stage.
+An analysis runs its `executable` once per stage-4 seed, on that seed's event file, in its own directory `<run_dir>/<name>/`. All analyses run in parallel after stage 4, with stage 4's `ntasks`; all other `resources` and the `powheg_parameters` can be set per analysis. One run can have any number of them: the defaults have `lhef` and `pythia` (disabled), and further ones can be added under names of their own.
 
 ```yaml
-lhef_executable: "./lhef_analysis"
-pythia_executable: "./main-PYTHIA82-lhef"
-
-stages:
+analyses:
   lhef:
     enabled: true
-    weight_correction: true                     # multiply the weights by ub_btilde_corr/ub_remn_corr
+    executable: "./lhef_analysis"
     link_files: ["powheg_output/FlavRegList"]   # further files the program needs; globs allowed
   pythia:
     enabled: true
+    executable: "./main-PYTHIA82-lhef"
     resources:
       time: "48:00:00"
+  pythia_nompi:                                 # an analysis of your own, in <run_dir>/pythia_nompi/
+    enabled: true
+    executable: "./main-PYTHIA82-lhef-nompi"
+    histogram: "pwgoutput_py8_histos-{seed}"
+    weight_correction: true
+    link_files: []
+    merge_method: 1
+    powheg_parameters:
+      py8MPI: 0
 ```
 
+- `lhef` and `pythia` take every key they don't set from the defaults (`powgatory --show-defaults`). An analysis of your own has no defaults: it sets `enabled`, `executable`, `histogram`, `weight_correction`, `link_files` and `merge_method`. Its name may have letters, digits and `_`; it must not start with `stage`, be `p<number>` or `addweights`, or be a directory POWgatory uses in `run_dir` (`logs`, `task_files`, …).
+- `histogram` is the name of the histogram file the program writes for a seed, without `.top`, with `{seed}` for the seed: `pwgLHEF_analysis-{seed}` for `lhef_analysis`, `pwgoutput_py8_histos-{seed}` for `main-PYTHIA8`. A seed is complete when this file is non-empty, with several weights `…-<seed>-W1.top`, `-W2.top`, ….
 - `weight_correction: true` applies POWHEG's upper bound correction: the factors `ub_btilde_corr` and `ub_remn_corr` of every seed are computed once from `pwgcounters-st4-<seed>.dat` into `<run_dir>/ub_corrections.yaml`, as POWHEG-BOX's `FindReweightFromCounters.py` does (also by hand: `python -m powgatory.ub_correction pwgcounters-st4-*.dat`). The counters contain the numbers only with `ubexcess_correct 1` in the POWHEG input.
-- Each seed gets `<seed>-powheg.input` (template, the stage's `powheg_parameters`, the seed's factors) and links to its event file and the `link_files`. The program reads the seed and the event file on stdin.
-- A seed is complete when its histogram file is non-empty: `pwgLHEF_analysis-<seed>.top` or `pwgoutput_py8_histos-<seed>.top`, with several weights `…-<seed>-W1.top`, `-W2.top`, …. A program that names its files differently needs its pattern in `HISTOGRAM_NAMES` in `powgatory/tasks.py`.
+- Each seed gets `<seed>-powheg.input` (template, the analysis's `powheg_parameters`, the seed's factors) and links to its event file and the `link_files`. The program reads the seed and the event file on stdin.
+- To add an analysis to a finished run, add it to `run.yaml` and start POWgatory again: stages 1–4 and the other analyses are complete and don't run again. A second config with the same `run_dir` is refused, since it would run stages 1–4 a second time.
+
+Configs from before version 2.6 had `lhef` and `pythia` under `stages:` and the top-level `lhef_executable` and `pythia_executable`. Move them under `analyses:`, each with its `executable`; their directories, logs and merged files keep their names.
 
 ## Merging histograms
 
-At the end, the histogram files (`.top`) of all seeds are merged, one file per weight, with the stage's `merge_method`:
+At the end, the histogram files (`.top`) of all seeds are merged, one file per weight, with the stage's or analysis's `merge_method`:
 
 | Stage | Files | Merged file |
 |---|---|---|
 | `stage2` | `pwg-<seed>-NLO.top` (only with `testplots 1`) | `pwg-mean-NLO.top` |
-| `lhef` | `lhef/pwgLHEF_analysis-<seed>[-W<n>].top` | `lhef/pwgLHEF_analysis-mean[-W<n>].top` |
-| `pythia` | `pythia/pwgoutput_py8_histos-<seed>[-W<n>].top` | `pythia/pwgoutput_py8_histos-mean[-W<n>].top` |
+| an analysis | `<name>/<histogram>[-W<n>].top` | `<name>/<histogram with mean for the seed>[-W<n>].top` |
+| e.g. `lhef` | `lhef/pwgLHEF_analysis-<seed>[-W<n>].top` | `lhef/pwgLHEF_analysis-mean[-W<n>].top` |
 
 | `merge_method` | Combination |
 |---|---|
@@ -289,12 +302,12 @@ Further arguments are passed on to b2luigi.
 Inside `job_settings.run_dir`:
 
 - POWHEG's input and output files (`p<N>-powheg.input`, `pwg*.dat`, `pwgevents-*.lhe`, …) and the `powheg.input`/`pwgseeds.dat` symlinks of the current stage.
-- `logs/<job_code>.log`: POWHEG's (or the analysis program's) output of one seed. The job code is e.g. `p1-x2-s7` (stage 1, grid iteration 2, seed 7), `p3-s12`, `stage3_fullgrid-s1` or `lhef-s3`.
+- `logs/<job_code>.log`: POWHEG's (or the analysis program's) output of one seed. The job code is e.g. `p1-x2-s7` (stage 1, grid iteration 2, seed 7), `p3-s12`, `stage3_fullgrid-s1` or, for an analysis, `lhef-s3`.
 - `logs/<job_code>/stdout`, `stderr`: the batch job's own output.
 - `timings.yaml`: run times per finished stage (shortest, longest, average, total).
 - `incomplete_run_backups/`: files of earlier failed or killed attempts.
 - `run_backups/<timestamp>/`: earlier runs, moved aside by `--clean`.
-- `ub_corrections.yaml`, `lhef/`, `pythia/`: see [Analysis stages](#analysis-stages); `pwg-mean-NLO.top`: see [Merging histograms](#merging-histograms).
+- `ub_corrections.yaml` and a directory per analysis, e.g. `lhef/`: see [Analyses](#analyses); `pwg-mean-NLO.top`: see [Merging histograms](#merging-histograms).
 - `task_files/`: b2luigi's generated job scripts.
 
 The lock file `.powgatory-run-dirs.lock` is in the directory that contains the run directory.
@@ -307,6 +320,7 @@ The lock file `.powgatory-run-dirs.lock` is in the directory that contains the r
 - **`Stage … requests … MB per node, but partition '…' has nodes with at most … MB`** (or `allows at most … MB per node`): no node of the partition can run the job. Lower `mem`; for `mpi` it is multiplied by the seeds per node.
 - **`Another POWgatory is already running in …`**: one is still running on that run directory.
 - **`Unknown submission_type '…'`**: a typo in `submission_type`.
+- **`stages.lhef: the analyses lhef and pythia are set under analyses:`**: a config from before version 2.6; see the end of [Analyses](#analyses).
 - **A stage silently doesn't run**: read the warnings printed at startup (e.g. a stage enabled while the stage before it is disabled).
 - **`ModuleNotFoundError: No module named 'pkg_resources'`**: `luigi` 3.6.0 got installed, usually by updating `b2luigi` on its own. Reinstall POWgatory (see [Installation](#installation)).
 - **Container pull fails**: check that `apptainer` is on `PATH` and the registry is reachable.

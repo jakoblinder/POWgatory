@@ -31,7 +31,7 @@ import b2luigi
 import luigi.configuration
 from b2luigi.batch.processes.slurm import SlurmProcess
 
-from .config import POWHEGConfig, SLURM_EXPORT, slurm_partitions
+from .config import POWHEGConfig, SLURM_EXPORT, slurm_partitions, stage_configs
 from . import __version__
 
 # This block makes sure that jobs are scheduled with a 2 second wait.
@@ -75,6 +75,24 @@ def _throttled_start_job(self):
 
 SlurmProcess.start_job = _throttled_start_job
 # End of patch!
+
+
+def refuse_shared_run_directories(configs):
+    """
+    Stop if two configs have the same run_dir. Their configs differ, so their tasks of stages 1-4
+    get different task IDs, and both would run every seed at the same time in the same directory.
+    """
+    config_files_by_run_dir = {}
+    for config in configs:
+        run_dir = Path(config["job_settings"]["run_dir"]).resolve()
+        config_files_by_run_dir.setdefault(run_dir, []).append(config["config_file"])
+
+    for run_dir, config_files in config_files_by_run_dir.items():
+        if len(config_files) > 1:
+            sys.exit(
+                f"{', '.join(config_files)} all have the run_dir {run_dir}, where they would run the same "
+                f"stages twice. To run several analyses of one run, put them into one config under analyses:."
+            )
 
 
 def lock_run_directories(run_dirs):
@@ -359,6 +377,7 @@ def run_workflow():
         parser.error("the following arguments are required: -c/--config_file")
 
     configs = [POWHEGConfig.from_yaml(config_file) for config_file in config_files]
+    refuse_shared_run_directories(configs)
 
     # Cleaning needs neither the executables nor sinfo, only that no POWgatory runs in the run_dir.
     if args.clean:
@@ -397,8 +416,8 @@ def run_workflow():
         print("\nDry run - would execute:")
         for config in configs:
             print(f"  Config:   {config['config_file']}")
-            print("  Enabled stages:")
-            for stage, settings in config.get('stages', {}).items():
+            print("  Enabled stages and analyses:")
+            for stage, settings in stage_configs(config).items():
                 if isinstance(settings, dict) and settings.get('enabled', False):
                     resources = settings['resources']
                     print(f"    - {stage} (batch_system={resources['batch_system']}, submission_type={resources['submission_type']})")

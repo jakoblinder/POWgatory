@@ -1,14 +1,14 @@
 #!/bin/bash
 
-# Runs one branch: pwhg_main for the stages 1-4, or, given an event file, the analysis program
-# of the stage lhef or pythia (e.g. lhef_analysis, main-PYTHIA82-lhef).
+# Runs one branch: pwhg_main for the stages 1-4, or, given an event file, the program of an
+# analysis (e.g. lhef_analysis, main-PYTHIA82-lhef).
 
 # Store commandline arguments
 JOBCODE="$1"
 SEED="$2"
 PRG="$3"
 LOGFILE="$4"
-EVENTFILE="$5"  # Only for the analysis stages
+EVENTFILE="$5"  # Only for the analyses
 
 echo "[${JOBCODE} (`hostname`)] Received: SEED=${SEED}, PRG=${PRG}, EVENTFILE=${EVENTFILE}"
 

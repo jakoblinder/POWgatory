@@ -8,8 +8,6 @@
 powheg_executable: "./pwhg_main"
 powheg_input_template: "powheg.input-save"
 powheg_seeds_template: "pwgseeds.dat-save"  # Optional
-lhef_executable: "./lhef_analysis"          # Used by the stage lhef
-pythia_executable: "./main-PYTHIA82-lhef"   # Used by the stage pythia
 
 # ============================================================================
 # JOB SUBMISSION SETTINGS
@@ -97,31 +95,45 @@ stages:
   stage4:
     enabled: true
 
-  # Analysis of the stage-4 event files, one run per stage-4 seed, in <run_dir>/lhef/ and
-  # <run_dir>/pythia/. The number of runs is stage4's ntasks; the other resources and the
-  # powheg_parameters can be set per stage, as for stages 1-4.
-  lhef:
-    enabled: false
-    # Multiply the event weights by ub_btilde_corr/ub_remn_corr from pwgcounters-st4-<seed>.dat
-    # (needs ubexcess_correct 1 in the POWHEG input).
-    weight_correction: true
-    # Further files or directories the program needs, linked into <run_dir>/lhef/. Paths are
-    # relative to the directory powgatory is started from, or absolute; glob patterns allowed.
-    link_files: []
-    # The histograms of all seeds are merged per weight, e.g. into pwgLHEF_analysis-mean-W1.top
-    # (methods as for stage2).
-    merge_method: 1
-
-  pythia:
-    enabled: false
-    weight_correction: true
-    link_files: []
-    merge_method: 1
-
   addweights:
     enabled: false                     # Enable to add reweighting to events
     rwl_file: "newweights.xml"         # Reweighting XML file
     lhe_dir: "."                       # Directory containing pwgevents-*.lhe files
+
+# ============================================================================
+# ANALYSES OF THE STAGE-4 EVENTS
+# ============================================================================
+# Each analysis runs its program once per stage-4 seed, on that seed's event file, in its own
+# directory <run_dir>/<name>/; all analyses run at the same time after stage 4. The number of
+# runs is stage4's ntasks; the other resources and the powheg_parameters can be set per analysis,
+# as for the stages. Any number of analyses can be added under a name of their own (letters,
+# digits and _), e.g. pythia_nompi with another executable; such an analysis sets every key
+# that lhef and pythia set here.
+analyses:
+  lhef:
+    enabled: false
+    executable: "./lhef_analysis"
+    # The histogram file the program writes for a seed, without .top; {seed} is the seed in 4 or
+    # 5 digits. A seed is complete when this file, or <name>-W1.top with several weights, is
+    # non-empty.
+    histogram: "pwgLHEF_analysis-{seed}"
+    # Multiply the event weights by ub_btilde_corr/ub_remn_corr from pwgcounters-st4-<seed>.dat
+    # (needs ubexcess_correct 1 in the POWHEG input).
+    weight_correction: true
+    # Further files or directories the program needs, linked into <run_dir>/<name>/. Paths are
+    # relative to the directory powgatory is started from, or absolute; glob patterns allowed.
+    link_files: []
+    # The histograms of all seeds are merged per weight, with the method's name in place of the
+    # seed, e.g. into pwgLHEF_analysis-mean-W1.top (methods as for stage2).
+    merge_method: 1
+
+  pythia:
+    enabled: false
+    executable: "./main-PYTHIA82-lhef"
+    histogram: "pwgoutput_py8_histos-{seed}"
+    weight_correction: true
+    link_files: []
+    merge_method: 1
 
 # ================================================================================
 # RESOURCE SETTINGS

@@ -10,8 +10,8 @@ jobs (b2luigi), submits them as Slurm job arrays or MPI jobs or runs them as loc
 each stage is done before starting the next one:
 
 stage 1 (`grid_iterations` iterations) → stage 2 → optional grid combination `stage3_fullgrid` →
-stage 3 → stage 4 → optional `lhef` and `pythia` analyses of the event files → merge of the
-histograms of stage 2, `lhef` and `pythia`.
+stage 3 → stage 4 → optional analyses of the event files (`lhef`, `pythia` and any of the user's
+own) → merge of the histograms of stage 2 and of each analysis.
 
 A branch counts as done when its output files exist and are non-empty, not by exit code. Running
 `powgatory -c run.yaml` again therefore only (re)runs what is incomplete.
@@ -58,13 +58,14 @@ A branch counts as done when its output files exist and are non-empty, not by ex
    - `job_settings.run_dir` (all outputs go there), `job_settings.container_image`
      (registry URL, local `.sif`, or `""`)
    - `stages.<stage>.enabled`, `stages.stage1.grid_iterations`
+   - `analyses.<name>.enabled` and `.executable` (see Analyses below)
    - `resources`: `batch_system` (`slurm` or `local`), `submission_type` (`array`, `single` or
      `mpi`: one multi-node job, one seed per core), `partition`, `ntasks` (number of seeds),
      `time`, `mem`
    - `powheg_parameters`: values that override the template, e.g. `ncall1`, `ncall2`,
      `nubound`, `numevts`
-   `resources` and `powheg_parameters` can be set at the top level and per stage
-   (`stages.<stage>.resources`), merged key by key.
+   `resources` and `powheg_parameters` can be set at the top level and per stage or analysis
+   (`stages.<stage>.resources`, `analyses.<name>.resources`), merged key by key.
 4. The POWHEG input needs `manyseeds 1`, which the default `powheg_parameters` set: POWgatory
    gives each branch its seed number. It sets `parallelstage` and `xgriditeration` itself.
    Stage 2 writes the NLO histograms `pwg-<seed>-NLO.top` only with `testplots 1`; the upper bound
@@ -73,8 +74,9 @@ A branch counts as done when its output files exist and are non-empty, not by ex
    time limits, memory per node) and lists what would run.
 6. `powgatory -c run.yaml` starts the run, from a shell in which `apptainer` is on `PATH` if a
    `container_image` is set (e.g. after `module load apptainer`): Slurm jobs get this shell's
-   `PATH` (`--export=PATH`). Several configs: `powgatory -c a.yaml b.yaml ...` (hundreds work);
-   they share the limits below, and the smallest value applies.
+   `PATH` (`--export=PATH`). Several configs: `powgatory -c a.yaml b.yaml ...` (hundreds work),
+   each with its own `run_dir` (a shared one is refused); they share the limits below, and the
+   smallest value applies.
    - `job_settings.workers` (default 250, `--workers N` overrides it): jobs submitted or running
      at the same time; a grouped Slurm submission counts once.
    - `job_settings.local_parallel_tasks` (`auto`: cores free at startup) and
@@ -108,15 +110,26 @@ user mentions fullgrid files or grid combination:
 
 ## Analyses and merged histograms
 
-- `lhef` and `pythia` run `lhef_executable` / `pythia_executable` once per stage-4 seed, in
-  `<run_dir>/lhef/` and `<run_dir>/pythia/`, with `weight_correction` (the factors
-  `ub_btilde_corr`, `ub_remn_corr` from `pwgcounters-st4-<seed>.dat`) and `link_files` (further
-  files the program needs).
-- `merge_method` per stage (`stage2`, `lhef`, `pythia`): 1 mean (default), 2 weighted with
-  1/error², 3 sum, 4 max, 5 min, 6 sum minus the last, 0 no merge; or a list, e.g. `[1, 4, 5]`,
-  for one merged file per method (`-mean`, `-max`, `-min`). Results:
-  `pwg-mean-NLO.top`, `lhef/pwgLHEF_analysis-mean[-W<n>].top`,
-  `pythia/pwgoutput_py8_histos-mean[-W<n>].top`.
+- Each entry under `analyses:` runs its `executable` once per stage-4 seed, in
+  `<run_dir>/<name>/`, with `weight_correction` (the factors `ub_btilde_corr`, `ub_remn_corr`
+  from `pwgcounters-st4-<seed>.dat`) and `link_files` (further files the program needs). A seed is
+  done when its `histogram` file (`<pattern with the seed>[-W1].top`) is non-empty.
+- The defaults have `lhef` (`pwgLHEF_analysis-{seed}`) and `pythia`
+  (`pwgoutput_py8_histos-{seed}`), disabled. For several analyses of one run (e.g. PYTHIA with
+  and without MPI), add entries with names of their own (letters, digits, `_`) to the same
+  config; such an entry has no defaults and sets `enabled`, `executable`, `histogram`,
+  `weight_correction`, `link_files` and `merge_method`. Don't write a second config with the
+  same `run_dir`: POWgatory refuses it, since it would run stages 1-4 again.
+- Adding an analysis to a finished run: add it to `run.yaml` and start POWgatory again; only
+  the new analysis runs (with the user's agreement, as for any run).
+- `stages.lhef: the analyses lhef and pythia are set under analyses:`: a config from before
+  version 2.6. Move `stages.lhef`/`stages.pythia` under `analyses:`, with `executable` in place
+  of the top-level `lhef_executable`/`pythia_executable`.
+- `merge_method` for `stage2` and per analysis: 1 mean (default), 2 weighted with 1/error², 3
+  sum, 4 max, 5 min, 6 sum minus the last, 0 no merge; or a list, e.g. `[1, 4, 5]`, for one
+  merged file per method (`-mean`, `-max`, `-min`). Results: `pwg-mean-NLO.top`, and the
+  `histogram` pattern with the method's name for the seed, e.g.
+  `lhef/pwgLHEF_analysis-mean[-W<n>].top`.
 - By hand: `python -m powgatory.merge 1 files... -out merged.top` (like `mergedata`), and
   `python -m powgatory.ub_correction pwgcounters-st4-*.dat` (like `FindReweightFromCounters.py`).
 

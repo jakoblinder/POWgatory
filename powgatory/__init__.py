@@ -15,5 +15,5 @@ Usage:
 See README.md for detailed documentation.
 """
 
-__version__ = "2.5.0"
+__version__ = "2.6.0"
 

@@ -17,8 +17,9 @@ from typing import Dict, Any, List, Optional, Tuple
 from .merge import METHOD_NAMES
 from .grid_contributions import grid_contributions
 
-# Stages that analyse the stage-4 event files, each with its own <stage>_executable.
-ANALYSIS_STAGES = ("lhef", "pythia")
+# The settings every analysis has; lhef and pythia get them from config_default.yaml, an analysis
+# of the user's own has to set them all.
+ANALYSIS_KEYS = ("enabled", "executable", "histogram", "weight_correction", "link_files", "merge_method")
 
 # merge_method of a stage whose histogram files are not merged.
 NO_MERGE = 0
@@ -144,11 +145,32 @@ def slurm_max_mpi_size(partition: str) -> int:
     return partition_info["max_job_nodes"] * slurm_tasks_per_node(partition_info)
 
 
+def analysis_names(config) -> List[str]:
+    """The names of the analyses (analyses:), each also the name of its directory in run_dir."""
+    return list(config["analyses"])
+
+
+def stage_configs(config) -> Dict[str, Dict[str, Any]]:
+    """
+    The settings of every stage and analysis by name, the POWHEG stages first. Inside the tasks an
+    analysis is a stage like the others, so the names of stages and analyses never overlap.
+    """
+    return {**config["stages"], **config["analyses"]}
+
+
+def stage_config(config, stage: str) -> Dict[str, Any]:
+    """The settings of a stage or an analysis."""
+    if stage in config["analyses"]:
+        return config["analyses"][stage]
+    else:
+        return config["stages"][stage]
+
+
 def slurm_submissions(config) -> Tuple[Tuple[str, str], ...]:
-    """The (submission_type, partition) pairs of a config's enabled Slurm stages, sorted."""
+    """The (submission_type, partition) pairs of a config's enabled Slurm stages and analyses, sorted."""
     return tuple(sorted({
         (stage["resources"]["submission_type"], stage["resources"]["partition"])
-        for stage in config["stages"].values()
+        for stage in stage_configs(config).values()
         if stage["enabled"] and stage["resources"]["batch_system"] == "slurm"
     }))
 
@@ -209,7 +231,9 @@ class POWHEGConfig:
         # Merge provided kwargs onto the defaults, recursively, so that a nested override
         # (e.g. a "resources" block missing a key like "max_grouping_size") doesn't wipe out
         # the sibling defaults for that same section.
-        self.config = POWHEGConfig._deep_merge(POWHEGConfig.get_defaults(), kwargs)
+        defaults    = POWHEGConfig.get_defaults()
+        self.config = POWHEGConfig._deep_merge(defaults, kwargs)
+        self.validate_stages_and_analyses(stage_names=list(defaults["stages"]))
 
         if "cwd" not in self.config:
             # Put the directory where the workflow is run into the config, so that tasks can use it.
@@ -226,9 +250,13 @@ class POWHEGConfig:
         # directory and removes "." and ".." by name, but, unlike Path.resolve(), keeps symlinks, so
         # that the paths stay as written. On Viper e.g. /u/<user> is a symlink to /viper/u1/<user>, and
         # the container, which mounts the home directory as $HOME, only has the former.
-        for key in ["powheg_executable", "lhef_executable", "pythia_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "cwd"]:
+        for key in ["powheg_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "cwd"]:
             if key in self.config:
                 self.config[key] = Path(os.path.abspath(self.config[key]))
+
+        # A string, not a Path, since nested values are not converted in to_dict.
+        for analysis in self["analyses"].values():
+            analysis["executable"] = os.path.abspath(analysis["executable"])
 
         # Output directories, the same way
         for key in ["run_dir", "log_dir"]:
@@ -246,22 +274,22 @@ class POWHEGConfig:
                 "Set them under stages.stage3.powheg_parameters instead."
             )
 
-        # Complete resources and powheg_parameters information for each stage,
-        # so that each stage has its own resources and powheg_parameters,
-        # either from the stage-specific config or from the global defaults.
-        for stage in self["stages"].keys():
-            if "resources" not in self["stages"][stage]:
-                self["stages"][stage]["resources"] = self["resources"]
+        # Complete resources and powheg_parameters information for each stage and analysis,
+        # so that each has its own resources and powheg_parameters,
+        # either from its own config or from the global defaults.
+        for settings in stage_configs(self).values():
+            if "resources" not in settings:
+                settings["resources"] = self["resources"]
             else:
                 for resource in self["resources"]:
-                    if resource not in self["stages"][stage]["resources"]:
-                        self["stages"][stage]["resources"][resource] = self["resources"][resource]
-            if "powheg_parameters" not in self["stages"][stage]:
-                self["stages"][stage]["powheg_parameters"] = self["powheg_parameters"]
+                    if resource not in settings["resources"]:
+                        settings["resources"][resource] = self["resources"][resource]
+            if "powheg_parameters" not in settings:
+                settings["powheg_parameters"] = self["powheg_parameters"]
             else:
                 for param in self["powheg_parameters"]:
-                    if param not in self["stages"][stage]["powheg_parameters"]:
-                        self["stages"][stage]["powheg_parameters"][param] = self["powheg_parameters"][param]
+                    if param not in settings["powheg_parameters"]:
+                        settings["powheg_parameters"][param] = self["powheg_parameters"][param]
 
         # The grid combination runs the first stage-3 seeds, one per contribution whose grids
         # POWHEG combines (see tasks.grid_combination_seeds). The count is read from the files,
@@ -280,15 +308,15 @@ class POWHEGConfig:
         self["job_settings"]["exclude_nodes"] = exclude_nodes
 
         # merge_method is one method or a list of them, each merged into a file of its own.
-        for merged_stage in ("stage2",) + ANALYSIS_STAGES:
-            merge_method = self["stages"][merged_stage]["merge_method"]
+        for merged_stage in ["stage2", *analysis_names(self)]:
+            merge_method = stage_config(self, merged_stage)["merge_method"]
             if isinstance(merge_method, list):
                 merge_methods = merge_method
             elif merge_method == NO_MERGE:
                 merge_methods = []
             else:
                 merge_methods = [merge_method]
-            self["stages"][merged_stage]["merge_method"] = merge_methods
+            stage_config(self, merged_stage)["merge_method"] = merge_methods
 
         for warning in self.validate_workflow_structure():
             print(warning)
@@ -382,7 +410,7 @@ class POWHEGConfig:
 
             # A block that is missing, or present with every entry commented out (parsed as None),
             # falls back to the defaults via the deep merge in __init__.
-            for key in ["powheg_parameters", "resources"]:
+            for key in ["powheg_parameters", "resources", "analyses"]:
                 if config_dict.get(key) is None:
                     config_dict[key] = {}
 
@@ -396,13 +424,67 @@ class POWHEGConfig:
         """Return the configuration dictionary."""
         output_dict = self.config.copy()
         # Convert Path objects to strings for serialization
-        for key in ["powheg_executable", "lhef_executable", "pythia_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "cwd", "python"]:
+        for key in ["powheg_executable", "powheg_input_template", "powheg_seeds_template", "script_dir", "cwd", "python"]:
             if key in output_dict:
                 output_dict[key] = str(output_dict[key])
         for key in ["run_dir", "log_dir"]:
             if key in output_dict.get("job_settings", {}):
                 output_dict["job_settings"][key] = str(output_dict["job_settings"][key])
         return output_dict
+
+    def validate_stages_and_analyses(self, stage_names: List[str]):
+        """
+        Check that stages: has only the POWHEG stages (stage_names, those of config_default.yaml)
+        and that every analysis has a name usable as directory name, distinct from the stages, and
+        every key in ANALYSIS_KEYS. Raises ValueError otherwise.
+        """
+        moved = [f"stages.{name}" for name in ("lhef", "pythia") if name in self["stages"]]
+        moved += [key for key in ("lhef_executable", "pythia_executable") if key in self.config]
+        if moved:
+            raise ValueError(
+                f"ERROR: {', '.join(moved)}: the analyses lhef and pythia are set under analyses:, each with "
+                f"its executable, e.g.\n"
+                f"analyses:\n"
+                f"  lhef:\n"
+                f"    enabled: true\n"
+                f"    executable: ./lhef_analysis"
+            )
+
+        unknown_stages = [name for name in self["stages"] if name not in stage_names]
+        if unknown_stages:
+            raise ValueError(
+                f"ERROR: stages: has {', '.join(unknown_stages)}, but the stages are {', '.join(stage_names)}. "
+                f"Analyses of the stage-4 events are set under analyses:."
+            )
+
+        # The name is the analysis's directory in run_dir and the start of its log files
+        # (<name>-s<seed>.log), so it must differ from what the stages and POWgatory's own tasks
+        # use: framework.stage_code takes a name starting with "stage" for a POWHEG stage, the
+        # stages' logs start with p<N>-, and POWHEGStageTimings finds an analysis's logs by
+        # "<name>-", which with a "-" in names would also match those of an analysis <name>-<more>.
+        reserved_names = ("logs", "task_files", "run_backups", "incomplete_run_backups", "presubmit", "weight_correction")
+        for name, analysis in self["analyses"].items():
+            if not re.fullmatch(r"[A-Za-z0-9_]+", name):
+                raise ValueError(f"ERROR: The analysis {name!r} needs a name of letters, digits and _, since it is also its directory in run_dir.")
+            elif name in stage_names or name.startswith("stage") or re.fullmatch(r"p[0-9]+", name) or name in reserved_names:
+                raise ValueError(
+                    f"ERROR: The analysis {name!r} needs another name: addweights, names starting with stage and "
+                    f"p<number> belong to the stages, and {', '.join(reserved_names)} are used in run_dir."
+                )
+            elif not isinstance(analysis, dict):
+                raise ValueError(f"ERROR: The analysis {name} is {analysis!r}, expected its settings {', '.join(ANALYSIS_KEYS)}.")
+
+            missing_keys = [key for key in ANALYSIS_KEYS if key not in analysis]
+            if missing_keys:
+                raise ValueError(
+                    f"ERROR: The analysis {name} has no {', '.join(missing_keys)}. An analysis other than lhef and "
+                    f"pythia has no defaults; see powgatory --show-defaults for what lhef and pythia set."
+                )
+            elif not isinstance(analysis["histogram"], str) or "{seed}" not in analysis["histogram"]:
+                raise ValueError(
+                    f"ERROR: The analysis {name} has histogram {analysis['histogram']!r}, expected the name of a "
+                    f"seed's histogram file without .top, with {{seed}} in place of the seed, e.g. pwgLHEF_analysis-{{seed}}."
+                )
 
     def validate_workflow_structure(self):
         """
@@ -412,7 +494,7 @@ class POWHEGConfig:
         - Stage 1 (all iterations) → Stage 2
         - Stage 2 → Stage 3 grid combination (stage3_fullgrid, optional) → Stage 3
         - Stage 3 → Stage 4
-        - Stage 4 → lhef/pythia/AddWeights (optional)
+        - Stage 4 → analyses/AddWeights (optional)
 
         Args:
             config: POWHEGConfig instance
@@ -459,10 +541,10 @@ class POWHEGConfig:
         if is_enabled('stage4') and not is_enabled('stage3'):
             warnings.append("WARNING: Stage 4 is enabled but Stage 3 is disabled")
 
-        # Check the analysis stages require Stage 4
-        for analysis_stage in ANALYSIS_STAGES:
-            if is_enabled(analysis_stage) and not is_enabled('stage4'):
-                warnings.append(f"WARNING: Stage {analysis_stage} is enabled but Stage 4 is disabled")
+        # Check the analyses require Stage 4
+        for name, analysis in self['analyses'].items():
+            if analysis['enabled'] and not is_enabled('stage4'):
+                warnings.append(f"WARNING: The analysis {name} is enabled but Stage 4 is disabled")
 
         # Check AddWeights requires Stage 4
         if stages.get('addweights', {}).get('enabled', False) and not is_enabled('stage4'):
@@ -489,12 +571,12 @@ class POWHEGConfig:
         if not isinstance(local_niceness, int) or not 0 <= local_niceness <= 19:
             raise ValueError(f"ERROR: job_settings.local_niceness is {local_niceness!r}, expected a number from 0 to 19.")
 
-        # Make sure the time limits are valid for each stage
-        for stage_name, stage_config in stages.items():
-            if not stage_config['enabled']:
+        # Make sure the time limits are valid for each stage and analysis
+        for stage_name, settings in stage_configs(self).items():
+            if not settings['enabled']:
                 continue
 
-            time_limit = stage_config['resources']['time']
+            time_limit = settings['resources']['time']
             try:
                 total_seconds = self._parse_slurm_time(time_limit)
             except ValueError:
@@ -506,7 +588,7 @@ class POWHEGConfig:
 
         # An MPI job requests mem times its ranks per node (POWHEGStage.slurm_settings).
         for stage_name in self.slurm_stages():
-            resources = stages[stage_name]['resources']
+            resources = stage_config(self, stage_name)['resources']
             if resources['submission_type'] == 'mpi' and not isinstance(resources['mem'], int):
                 raise ValueError(
                     f"ERROR: Stage {stage_name} has submission_type mpi and mem {resources['mem']!r}, expected "
@@ -516,18 +598,18 @@ class POWHEGConfig:
         return warnings
 
     def slurm_stages(self) -> List[str]:
-        """The enabled stages that are submitted to Slurm."""
+        """The enabled stages and analyses that are submitted to Slurm."""
         return [
-            stage_name for stage_name, stage_config in self['stages'].items()
-            if stage_config['enabled'] and stage_config['resources']['batch_system'] == 'slurm'
+            stage_name for stage_name, settings in stage_configs(self).items()
+            if settings['enabled'] and settings['resources']['batch_system'] == 'slurm'
         ]
 
     def stage_seed_count(self, stage_name: str) -> int:
         """
-        The most seeds a stage runs (tasks.stage_seeds): stage 4's for the analysis stages, one per
+        The most seeds a stage runs (tasks.stage_seeds): stage 4's for the analyses, one per
         contribution for stage3_fullgrid, else its ntasks.
         """
-        if stage_name in ANALYSIS_STAGES:
+        if stage_name in analysis_names(self):
             return self['stages']['stage4']['resources']['ntasks']
         elif stage_name == 'stage3_fullgrid' and isinstance(self['stages'][stage_name]['contributions'], int):
             return self['stages'][stage_name]['contributions']
@@ -546,7 +628,7 @@ class POWHEGConfig:
         """
         warnings = []
         for stage_name in self.slurm_stages():
-            resources = self['stages'][stage_name]['resources']
+            resources = stage_config(self, stage_name)['resources']
             partition = resources['partition']
             if partition not in partitions:
                 raise ValueError(
@@ -639,15 +721,14 @@ class POWHEGConfig:
         if not self['powheg_seeds_template'].exists():
             raise FileNotFoundError(f"ERROR: pwgseeds.dat-save not found: {self['powheg_seeds_template']}")
 
-        # Check for the executables of the enabled analysis stages
-        for analysis_stage in ANALYSIS_STAGES:
-            executable = self[f'{analysis_stage}_executable']
-            if self['stages'][analysis_stage]['enabled'] and not executable.exists():
-                raise FileNotFoundError(f"ERROR: Executable of stage {analysis_stage} not found: {executable}")
+        # Check for the executables of the enabled analyses
+        for name, analysis in self['analyses'].items():
+            if analysis['enabled'] and not Path(analysis['executable']).exists():
+                raise FileNotFoundError(f"ERROR: Executable of the analysis {name} not found: {analysis['executable']}")
 
         # Check the merge methods of the stages whose histogram files are merged
-        for merged_stage in ("stage2",) + ANALYSIS_STAGES:
-            merge_methods = self['stages'][merged_stage]['merge_method']
+        for merged_stage in ["stage2", *analysis_names(self)]:
+            merge_methods = stage_config(self, merged_stage)['merge_method']
             if any(merge_method not in METHOD_NAMES for merge_method in merge_methods):
                 raise ValueError(f"ERROR: Stage {merged_stage} has merge_method {merge_methods}, expected one of {sorted(METHOD_NAMES)} or a list of them, or {NO_MERGE} for no merge.")
 

@@ -16,7 +16,7 @@ from typing import Iterable, List, Tuple
 
 from luigi.task import TASK_ID_INVALID_CHAR_REGEX
 
-from .config import POWHEGConfig
+from .config import POWHEGConfig, stage_config
 
 
 def get_stage_number(stage: str) -> int:
@@ -41,7 +41,7 @@ def get_stage_str(stage_number: int) -> str:
 def stage_code(stage: str, grid: int = -1) -> str:
     """
     The short name of a stage in file names: p1-x2 for stage1 grid iteration 2, p3 for stage3,
-    the name itself for the other stages (e.g. lhef, stage3_fullgrid).
+    the name itself for stage3_fullgrid and the analyses (e.g. lhef).
     """
     if stage.startswith("stage") and not stage.endswith("_fullgrid"):
         if grid > 0:
@@ -194,7 +194,7 @@ class POWHEGBaseTask(Task):
 
     stage          = b2luigi.Parameter(
         default="stage1",
-        description="POWHEG stage number (stage1, stage2, stage3, stage4, stage3_fullgrid, lhef, pythia, addweights)"
+        description="POWHEG stage (stage1, stage2, stage3, stage4, stage3_fullgrid, addweights) or the name of an analysis"
     )
     grid_iteration = b2luigi.IntParameter(
         default=-1,
@@ -232,6 +232,11 @@ class POWHEGBaseTask(Task):
         Return the base path for task outputs, derived from the configuration.
         """
         return self.config["job_settings"]["run_dir"]
+
+    @property
+    def stage_config(self) -> dict:
+        """The settings of this task's stage or analysis."""
+        return stage_config(self.config, self.stage)
 
     @property
     def stage_number(self) -> int:
@@ -368,7 +373,7 @@ class POWHEGBaseTask(Task):
         """
         Generate unique job identifier.
         Args:
-            stage (str): Stage name (e.g., "stage1", "stage2", "stage3", "stage4", "lhef").
+            stage (str): Stage or analysis name (e.g., "stage1", "stage2", "stage3", "stage4", "lhef").
             grid (int): Grid iteration number (default: -1, meaning no grid iteration).
             seed (int | tuple): Seed of the job, or a group of seeds (default: 1).
         Returns:
