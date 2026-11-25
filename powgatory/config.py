@@ -603,7 +603,13 @@ class POWHEGConfig:
                         f"(Viper: at most 64)."
                     )
 
-            if resources['submission_type'] == 'mpi':
+            if resources['submission_type'] == 'array' and slurm_max_array_size() == 0:
+                warnings.append(
+                    f"WARNING: Stage {stage_name} is submitted as a job array, but this cluster does not allow job "
+                    f"arrays (MaxArraySize 0), so sbatch refuses the job. Set submission_type to mpi or single, "
+                    f"or batch_system to local."
+                )
+            elif resources['submission_type'] == 'mpi':
                 max_mpi_size = partition_info['max_job_nodes'] * tasks_per_node
                 if group_size > max_mpi_size:
                     warnings.append(
