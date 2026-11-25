@@ -24,7 +24,7 @@ import yaml
 # Import our framework classes
 from .framework import POWHEGBaseTask, POWHEGWrapperTask
 from .config import (
-    POWHEGConfig, ANALYSIS_STAGES, NO_MERGE, SLURM_EXPORT, auto_grouping_size, slurm_partitions, slurm_submissions,
+    POWHEGConfig, ANALYSIS_STAGES, SLURM_EXPORT, auto_grouping_size, slurm_partitions, slurm_submissions,
     slurm_tasks_per_node,
 )
 from .merge import METHOD_NAMES, merge_histograms
@@ -1311,8 +1311,7 @@ class POWHEGMerge(POWHEGStage):
         yield POWHEGStageTimings(stage=self.stage, version=self.version, config=self.config)
 
     def output(self):
-        pattern, weights = self._pattern_and_weights()
-        return [[b2luigi.LocalTarget(str(self._merged_file(pattern, weight)))] for weight in weights]
+        return [[b2luigi.LocalTarget(str(merged_file))] for merged_file in self._merged_files()]
 
     def complete(self):
         """
@@ -1323,15 +1322,10 @@ class POWHEGMerge(POWHEGStage):
         if not POWHEGStageTimings(stage=self.stage, version=self.version, config=self.config).complete():
             return False
         else:
-            pattern, weights = self._pattern_and_weights()
-            return all(
-                self._merged_file(pattern, weight).exists() and self._merged_file(pattern, weight).stat().st_size > 0
-                for weight in weights
-            )
+            return all(merged_file.exists() and merged_file.stat().st_size > 0 for merged_file in self._merged_files())
 
     def run(self):
-        """Merge the histogram files of all seeds, one merged file per weight."""
-        method = int(self.config["stages"][self.stage]["merge_method"])
+        """Merge the histogram files of all seeds, one merged file per weight and merge method."""
         pattern, weights = self._pattern_and_weights()
 
         if pattern is None:
@@ -1350,9 +1344,10 @@ class POWHEGMerge(POWHEGStage):
                 if missing_seeds:
                     self.publish_message(f"WARNING: {len(missing_seeds)} seeds have no {pattern}{weight}.top and are left out: {missing_seeds[:20]}")
 
-                merged_file = self._merged_file(pattern, weight)
-                self.publish_message(f"Merging {len(input_files)} files into {merged_file} with method {method} ({METHOD_NAMES[method]})")
-                merge_histograms(input_files, method, merged_file)
+                for method in self.config["stages"][self.stage]["merge_method"]:
+                    merged_file = self._merged_file(pattern, weight, method)
+                    self.publish_message(f"Merging {len(input_files)} files into {merged_file} with method {method} ({METHOD_NAMES[method]})")
+                    merge_histograms(input_files, method, merged_file)
 
     def _histogram_dir(self) -> Path:
         run_dir = Path(self.config["job_settings"]["run_dir"])
@@ -1380,10 +1375,18 @@ class POWHEGMerge(POWHEGStage):
                     return pattern, weights
         return None, []
 
-    def _merged_file(self, pattern: str, weight: str) -> Path:
-        """The merged file of a weight: the pattern with the method's name in place of the seed."""
-        method_name = METHOD_NAMES[int(self.config["stages"][self.stage]["merge_method"])]
-        return self._histogram_dir() / f"{pattern.format(seed=method_name)}{weight}.top"
+    def _merged_files(self) -> List[Path]:
+        """The merged files of every weight and merge method."""
+        pattern, weights = self._pattern_and_weights()
+        return [
+            self._merged_file(pattern, weight, method)
+            for weight in weights
+            for method in self.config["stages"][self.stage]["merge_method"]
+        ]
+
+    def _merged_file(self, pattern: str, weight: str, method: int) -> Path:
+        """The merged file of a weight and merge method: the pattern with the method's name in place of the seed."""
+        return self._histogram_dir() / f"{pattern.format(seed=METHOD_NAMES[method])}{weight}.top"
 
 
 class POWHEGStageWrapper(POWHEGWrapperTask):
@@ -1455,7 +1458,7 @@ class POWHEGWorkflow(POWHEGWrapperTask):
         # stage is required through its timings task (stage 2 already is, through stage 3 or 4).
         for stage in ("stage2",) + ANALYSIS_STAGES:
             enabled = stages_config[stage]['enabled']
-            merged  = stages_config[stage]['merge_method'] != NO_MERGE
+            merged  = bool(stages_config[stage]['merge_method'])
             if enabled and merged:
                 yield POWHEGMerge(stage=stage, grid_iteration=-1, branch_id=1, version=self.version, config=self.config)
             elif enabled and stage in ANALYSIS_STAGES:

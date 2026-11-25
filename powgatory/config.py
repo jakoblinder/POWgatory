@@ -271,6 +271,17 @@ class POWHEGConfig:
             exclude_nodes = [node.strip() for node in exclude_nodes.split(",")]
         self["job_settings"]["exclude_nodes"] = exclude_nodes
 
+        # merge_method is one method or a list of them, each merged into a file of its own.
+        for merged_stage in ("stage2",) + ANALYSIS_STAGES:
+            merge_method = self["stages"][merged_stage]["merge_method"]
+            if isinstance(merge_method, list):
+                merge_methods = merge_method
+            elif merge_method == NO_MERGE:
+                merge_methods = []
+            else:
+                merge_methods = [merge_method]
+            self["stages"][merged_stage]["merge_method"] = merge_methods
+
         for warning in self.validate_workflow_structure():
             print(warning)
 
@@ -622,9 +633,9 @@ class POWHEGConfig:
 
         # Check the merge methods of the stages whose histogram files are merged
         for merged_stage in ("stage2",) + ANALYSIS_STAGES:
-            merge_method = self['stages'][merged_stage]['merge_method']
-            if merge_method != NO_MERGE and merge_method not in METHOD_NAMES:
-                raise ValueError(f"ERROR: Stage {merged_stage} has merge_method {merge_method}, expected one of {sorted(METHOD_NAMES)}, or {NO_MERGE} for no merge.")
+            merge_methods = self['stages'][merged_stage]['merge_method']
+            if any(merge_method not in METHOD_NAMES for merge_method in merge_methods):
+                raise ValueError(f"ERROR: Stage {merged_stage} has merge_method {merge_methods}, expected one of {sorted(METHOD_NAMES)} or a list of them, or {NO_MERGE} for no merge.")
 
     # Dict-like interface delegation to self.config
     def __getitem__(self, key):

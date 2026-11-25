@@ -247,6 +247,8 @@ At the end, the histogram files (`.top`) of all seeds are merged, one file per w
 | 6 `sum-last` | Sum of all but the last set, minus the last set |
 | 0 | No merge for this stage |
 
+`merge_method` can also be a list of methods, each written to a file of its own: e.g. `[1, 4, 5]` gives `…-mean…`, `…-max…` and `…-min….top`, all in the same merge job.
+
 The merged file has the method's name in place of the seed. Seeds without a file are left out with a warning; without any file (e.g. stage 2 without `testplots 1`) nothing is merged. Each merge is one job with its stage's `resources`; stage 2's runs while stage 3 runs.
 
 The merge (`powgatory/merge.py`) writes the same output as POWHEG's `mergedata` and reads one file at a time. All files need the same bins. By hand:

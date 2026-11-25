@@ -70,7 +70,7 @@ stages:
     # The NLO histograms pwg-<seed>-NLO.top of all seeds (written only with testplots 1) are
     # merged into pwg-mean-NLO.top, as a job with this stage's resources. Methods: 1 mean of sets
     # with equal statistics, 2 weighted with 1/error^2, 3 sum, 4 max, 5 min, 6 sum minus the last;
-    # 0 no merge.
+    # 0 no merge. A list, e.g. [1, 4, 5], writes a merged file per method (mean, max, min).
     merge_method: 1
 
   # Grid combination: at the start of stage 3, POWHEG combines the stage-2 grids of each
