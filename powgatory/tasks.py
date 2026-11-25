@@ -49,9 +49,17 @@ class POWHEGPresubmit(POWHEGBaseTask):
 
     batch_system = "local"
 
+    # Inherited from POWHEGBaseTask, but unused: the task runs once per run, before every stage.
+    stage          = b2luigi.Parameter(default="stage1", significant=False)
+    grid_iteration = b2luigi.IntParameter(default=-1, significant=False)
+
     @property
     def stage_name(self) -> str:
         return "presubmit"
+
+    def task_label(self) -> str:
+        """The label of the task ID: none, since the task has no stage of its own."""
+        return ""
 
     def output(self):
         """Task completion marker."""
@@ -63,6 +71,11 @@ class POWHEGPresubmit(POWHEGBaseTask):
         # each copy a local image, and a job could start apptainer on another job's half-written
         # copy. POWHEGStage still calls setup_container, which then finds the image in place.
         self.setup_container()
+
+        # The script may read powheg.input (e.g. couplings); the input of stage 1, grid iteration 1
+        # is the only one that does not depend on earlier stages. The link tasks of all stages run
+        # after this task and point powheg.input at their own input.
+        self.link_stage_input(get_stage_str(1), grid=1)
 
         presubmit_script = self.config["job_settings"]["presubmit"]
         if presubmit_script:
@@ -88,10 +101,10 @@ class POWHEGPresubmit(POWHEGBaseTask):
                 f.write(f"{self.stage_name}: No presubmit script defined. Skipping..\n")
 
     def requires(self):
-        # Depend on setup task for this grid iteration.
-        yield POWHEGCreateSymlinks(
-            stage          = self.stage,
-            grid_iteration = self.grid_iteration,
+        # The input that run() links for the script.
+        yield POWHEGStageSetup(
+            stage          = get_stage_str(1),
+            grid_iteration = 1,
             version        = self.version,
             config         = self.config
         )
@@ -218,11 +231,16 @@ class POWHEGCreateSymlinks(POWHEGBaseTask):
 
     def run(self):
         """Create symlinks for POWHEG input and seeds."""
-        self.create_symlinks(stage=self.stage, grid=self.grid_iteration)
+        self.link_stage_input(stage=self.stage, grid=self.grid_iteration)
+
+        with self.output().open('w') as f:
+            f.write(f"Symlinks created for {self.stage}, grid {self.grid_iteration}\n")
 
     def requires(self):
         """
         Depend on setup task for this grid iteration.
+        AND
+        Depend on the presubmit task, which links powheg.input for its script first.
         AND
         Depend on previous stage for stage > 1, so that the correct input files are linked.
         """
@@ -232,6 +250,7 @@ class POWHEGCreateSymlinks(POWHEGBaseTask):
             version        = self.version,
             config         = self.config
         )
+        yield POWHEGPresubmit(version=self.version, config=self.config)
         if self.stage_number == 1 and self.grid_iteration > 1:
             # Depend on previous grid iteration for Stage 1
             yield POWHEGStageTimings(stage=get_stage_str(1), grid_iteration=self.grid_iteration - 1, version=self.version, config=self.config)
@@ -247,47 +266,6 @@ class POWHEGCreateSymlinks(POWHEGBaseTask):
             # Depend on previous stage for stage > 2
             yield POWHEGStageTimings(stage=get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
 
-
-    def create_symlinks(self, stage: str, grid: int = -1):
-        """Create symlinks for POWHEG input and seeds."""
-
-        if grid > 0:
-            self.publish_message(f"Creating symlinks for {stage}, grid {grid}")
-        else:
-            self.publish_message(f"Creating symlinks for {stage}")
-
-        input_file = Path(self.local_path(f"{stage_code(stage, grid)}-powheg.input"))
-
-        self.publish_message(f"Creating symlink for powheg.input: {input_file}")
-
-        powheg_input_link = Path(self.local_path("powheg.input"))  # The file that is needed.
-        if powheg_input_link.exists() or powheg_input_link.is_symlink():
-            powheg_input_link.unlink()
-        # Create symlink to the input file
-        powheg_input_link.symlink_to(input_file)
-
-
-        # Log if source doesn't exist
-        if not input_file.exists():
-            self.publish_message(f"WARNING: {input_file} not found, symlink points to non-existent file")
-
-        # Create symlink to pwgseeds.dat for POWHEG to find
-        seeds_template = Path(self.config['powheg_seeds_template'])
-        seeds_link     = Path(self.local_path('pwgseeds.dat'))  # Where the file is needed.
-
-        # Always create symlink, even if source doesn't exist yet
-        # (POWHEG might create it, or it might already be in place)
-        if seeds_link.exists() or seeds_link.is_symlink():
-            seeds_link.unlink()
-        # Create symlink to the template
-        seeds_link.symlink_to(seeds_template)
-
-        # Log if source doesn't exist
-        if not seeds_template.exists():
-            self.publish_message(f"WARNING: {seeds_template} not found, symlink points to non-existent file")
-
-        with self.output().open('w') as f:
-            f.write(f"Symlinks created for {stage}, grid {grid}\n")
 
 
 class POWHEGStage(POWHEGBaseTask):
@@ -880,10 +858,6 @@ class POWHEGStageTimings(POWHEGBaseTask):
         default="stage1",
         description="POWHEG stage number (stage1, stage2, stage3, stage4, lhef, pythia)"
     )
-    grid_iteration = b2luigi.IntParameter(
-        default=-1,
-        description="Grid iteration number (1, 2, 3, ...)"
-    )
 
     batch_system = "local"
 
@@ -1151,7 +1125,7 @@ class POWHEGWeightCorrection(POWHEGBaseTask):
 
     # Inherited from POWHEGBaseTask, but unused: the task belongs to no stage.
     stage          = b2luigi.Parameter(default="stage1", significant=False)
-    grid_iteration = b2luigi.IntParameter(default=1, significant=False)
+    grid_iteration = b2luigi.IntParameter(default=-1, significant=False)
 
     @property
     def stage_name(self) -> str:
@@ -1257,7 +1231,7 @@ class POWHEGAnalysis(POWHEGStage):
     """
 
     def requires(self):
-        yield POWHEGAnalysisSetup(stage=self.stage, grid_iteration=-1, version=self.version, config=self.config)
+        yield POWHEGAnalysisSetup(stage=self.stage, version=self.version, config=self.config)
         # Depend on presubmit task, which sets up the container.
         yield POWHEGPresubmit(version=self.version, config=self.config)
 
@@ -1483,7 +1457,7 @@ class POWHEGWorkflow(POWHEGWrapperTask):
             enabled = stages_config[stage]['enabled']
             merged  = bool(stages_config[stage]['merge_method'])
             if enabled and merged:
-                yield POWHEGMerge(stage=stage, grid_iteration=-1, branch_id=1, version=self.version, config=self.config)
+                yield POWHEGMerge(stage=stage, branch_id=1, version=self.version, config=self.config)
             elif enabled and stage in ANALYSIS_STAGES:
                 yield POWHEGStageTimings(stage=stage, version=self.version, config=self.config)
 

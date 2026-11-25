@@ -196,8 +196,8 @@ class POWHEGBaseTask(Task):
         description="POWHEG stage number (stage1, stage2, stage3, stage4, stage3_fullgrid, lhef, pythia, addweights)"
     )
     grid_iteration = b2luigi.IntParameter(
-        default=1,
-        description="Grid iteration number (1, 2, 3, ...)"
+        default=-1,
+        description="Grid iteration number (1, 2, 3, ...) of stage 1, -1 for the other stages"
     )
 
     config = SharedDictParameter(hashed=True,
@@ -255,6 +255,44 @@ class POWHEGBaseTask(Task):
         # Directory where b2luigi task and log files are stored
         path = os.path.join(self.config["job_settings"]["log_dir"])
         return path
+
+    def link_stage_input(self, stage: str, grid: int = -1):
+        """Point powheg.input in the run_dir at the input of stage and grid, and pwgseeds.dat at the seeds template."""
+
+        if grid > 0:
+            self.publish_message(f"Creating symlinks for {stage}, grid {grid}")
+        else:
+            self.publish_message(f"Creating symlinks for {stage}")
+
+        input_file = Path(self.local_path(f"{stage_code(stage, grid)}-powheg.input"))
+
+        self.publish_message(f"Creating symlink for powheg.input: {input_file}")
+
+        powheg_input_link = Path(self.local_path("powheg.input"))  # The file that is needed.
+        if powheg_input_link.exists() or powheg_input_link.is_symlink():
+            powheg_input_link.unlink()
+        # Create symlink to the input file
+        powheg_input_link.symlink_to(input_file)
+
+
+        # Log if source doesn't exist
+        if not input_file.exists():
+            self.publish_message(f"WARNING: {input_file} not found, symlink points to non-existent file")
+
+        # Create symlink to pwgseeds.dat for POWHEG to find
+        seeds_template = Path(self.config['powheg_seeds_template'])
+        seeds_link     = Path(self.local_path('pwgseeds.dat'))  # Where the file is needed.
+
+        # Always create symlink, even if source doesn't exist yet
+        # (POWHEG might create it, or it might already be in place)
+        if seeds_link.exists() or seeds_link.is_symlink():
+            seeds_link.unlink()
+        # Create symlink to the template
+        seeds_link.symlink_to(seeds_template)
+
+        # Log if source doesn't exist
+        if not seeds_template.exists():
+            self.publish_message(f"WARNING: {seeds_template} not found, symlink points to non-existent file")
 
     def setup_container(self):
         """
