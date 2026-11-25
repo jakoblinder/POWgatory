@@ -240,8 +240,11 @@ class POWHEGBaseTask(Task):
 
     @property
     def stage_name(self) -> str:
-        """Stage name for resource lookup. Override in subclasses."""
-        raise NotImplementedError
+        """The stage and grid iteration, e.g. stage1-grid2 or stage3: the key in timings.yaml and part of the Slurm job names."""
+        if self.grid_iteration > 0:
+            return f"{self.stage}-grid{self.grid_iteration}"
+        else:
+            return self.stage
 
     def get_config(self) -> POWHEGConfig:
         """

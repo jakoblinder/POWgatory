@@ -117,13 +117,6 @@ class POWHEGStageSetup(POWHEGBaseTask):
     """
     batch_system = "local"
 
-    @property
-    def stage_name(self) -> str:
-        if self.grid_iteration > 0:
-            return f"{self.stage}-grid{self.grid_iteration}_setup"
-        else:
-            return f"{self.stage}_setup"
-
     def output(self):
         # The name create_powheg_input writes: e.g. p1-x2-powheg.input, or stage3_fullgrid-powheg.input.
         return self.local_target(f"{stage_code(self.stage, self.grid_iteration)}-powheg.input")
@@ -217,13 +210,6 @@ class POWHEGCreateSymlinks(POWHEGBaseTask):
     """
 
     batch_system = "local"
-
-    @property
-    def stage_name(self) -> str:
-        if self.grid_iteration > 0:
-            return f"{self.stage}-grid{self.grid_iteration}_symlink"
-        else:
-            return f"{self.stage}_symlink"
 
     def output(self):
         """Task completion marker."""
@@ -494,13 +480,6 @@ class POWHEGStage(POWHEGBaseTask):
                 slurm_settings["exclude"] = ",".join(exclude_nodes)
 
             return slurm_settings
-
-    @property
-    def stage_name(self) -> str:
-        if self.grid_iteration > 0:
-            return f"{self.stage}-grid{self.grid_iteration}"
-        else:
-            return f"{self.stage}"
 
     @property
     def __name__(self):
@@ -860,12 +839,6 @@ class POWHEGStageTimings(POWHEGBaseTask):
     )
 
     batch_system = "local"
-
-    @property
-    def stage_name(self) -> str:
-        if self.grid_iteration > 0:
-            return f"{self.stage}-grid{self.grid_iteration}"
-        return self.stage
 
     def requires(self):
         yield POWHEGStageWrapper(
