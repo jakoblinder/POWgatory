@@ -12,8 +12,41 @@ import luigi
 import b2luigi
 import subprocess
 from pathlib import Path
+from typing import Iterable, List, Tuple
+
+from luigi.task import TASK_ID_INVALID_CHAR_REGEX
 
 from .config import POWHEGConfig
+
+
+def get_stage_number(stage: str) -> int:
+    """The number of a stage: 1-4 for stage1-stage4, 3 for stage3_fullgrid, 4 for addweights."""
+    if stage.startswith("stage") and not stage.endswith("_fullgrid"):
+        return int(stage.replace("stage", ""))
+    elif stage == "addweights":
+        return 4
+    elif stage == "stage3_fullgrid":
+        return 3
+    else:
+        raise ValueError(f"Unknown stage: {stage}")
+
+
+def get_stage_str(stage_number: int) -> str:
+    """The name of stage 1-4, e.g. stage2."""
+    assert stage_number in [1, 2, 3, 4], "Stage number must be between 1 and 4"
+
+    return f"stage{stage_number}"
+
+
+def seed_runs(seeds: Iterable[int]) -> List[Tuple[int, int]]:
+    """The seeds as runs of consecutive numbers (first, last): e.g. (1, 2, 3, 5) -> [(1, 3), (5, 5)]."""
+    runs = []
+    for seed in sorted(seeds):
+        if runs and seed == runs[-1][1] + 1:
+            runs[-1] = (runs[-1][0], seed)
+        else:
+            runs.append((seed, seed))
+    return runs
 
 
 class SharedDictParameter(b2luigi.DictParameter):
@@ -117,6 +150,20 @@ class POWHEGBaseTask(Task):
                                  description="POWHEG configuration dictionary",
                                 )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # luigi's task ID shows the first 16 characters of the first three parameters by name, e.g.
+        # POWHEGStage__1__5__10__6__8____powheg_executa_1_34f94f46de. Its hash of all parameters
+        # keeps the ID unique; put a readable label before it instead. Batch jobs find their task
+        # by this ID, so it may depend on nothing but the parameters.
+        parameter_hash = self.task_id.rsplit("_", 1)[1]
+        label          = TASK_ID_INVALID_CHAR_REGEX.sub("_", self.task_label())
+        self.task_id   = f"{self.get_task_family()}_{label}_{parameter_hash}"
+
+    def task_label(self) -> str:
+        """The label of the task ID: the stage and grid iteration as in file names, e.g. p1-x2."""
+        return self.stage_code(self.stage, self.grid_iteration)
+
     @property
     def retry_count(self) -> int:
         """
@@ -160,6 +207,10 @@ class POWHEGBaseTask(Task):
                     continue
                 elif param_name == "version":
                     continue  # Skip version in the representation, since its printed once at the beginning of the workflow
+                elif isinstance(param_value, tuple):
+                    # A group of seeds, e.g. branch_id=1-3,5,8-10
+                    runs = ",".join(f"{first}-{last}" if last > first else f"{first}" for first, last in seed_runs(param_value))
+                    repr_parts.append(f"{param_name:s}={runs:s}")
                 else:
                     repr_parts.append(f"{param_name:s}={param_objs[param_name].serialize(param_value):s}")
 
@@ -173,31 +224,10 @@ class POWHEGBaseTask(Task):
         """
         return self.config["job_settings"]["run_dir"]
 
-    @staticmethod
-    def get_stage_number(stage:str) -> int:
-        """Return the numeric stage number for resource lookup."""
-        if stage.startswith("stage") and not stage.endswith("_fullgrid"):
-            return int(stage.replace("stage", ""))
-        elif stage == "addweights":
-            return 4
-        elif stage == "analysis":
-            return 1  # Analysis stage doesn't have a specific number
-        elif stage == "stage3_fullgrid":
-            return 3
-        else:
-            raise ValueError(f"Unknown stage: {stage}")
-
     @property
     def stage_number(self) -> int:
         """Return the numeric stage number for resource lookup."""
-        return self.get_stage_number(self.stage)
-
-    @staticmethod
-    def get_stage_str(stage_number: int) -> str:
-        """Convert numeric stage number to string representation."""
-        assert stage_number in [1, 2, 3, 4], "Stage number must be between 1 and 4"
-
-        return f"stage{stage_number}"
+        return get_stage_number(self.stage)
 
     @property
     def stage_name(self) -> str:
@@ -276,32 +306,13 @@ class POWHEGBaseTask(Task):
 
     def format_branch_id(self, seed: int | tuple) -> str:
         """
-        If the seed is a grouped parameter, the seed is a tuple.
-        This method is used to simplify it for printing purposes, e.g. for the job name or file names.
-
-        Args:
-            seed (int | tuple): The seed to format.
-
-        Returns:
-            str: The formatted seed:
-
-            The seed string is simplified as
-                s3to9
-            for seed = (3, 4, 5, 8, 9) for example.
-            If there are less or equal than 5 ids, for example, (3, 4, 5, 8, 9), they are listed as
-                s3-s4-s5-s8-s9
-            For a single seed, the seed string is simply
-                s<id>
+        The seed, or a group of seeds (a tuple), for job names and file names: e.g. s7, or
+        s1to3_5_8to10 for (1, 2, 3, 5, 8, 9, 10).
         """
         if isinstance(seed, tuple):
-            if len(seed) <= 5:
-                seed_str = "-".join([f"s{b}" for b in seed])
-            else:
-                seed_str = "to".join(["s" + str(min(seed)), str(max(seed))])
+            return "s" + "_".join(f"{first}to{last}" if last > first else f"{first}" for first, last in seed_runs(seed))
         else:
-            seed_str = f"s{seed}"
-
-        return seed_str
+            return f"s{seed}"
 
     def stage_code(self, stage: str, grid: int = -1) -> str:
         """
@@ -316,30 +327,24 @@ class POWHEGBaseTask(Task):
         if isinstance(stage, str) and stage.startswith("stage") and not stage.endswith("_fullgrid"):
             # stage_number = int(stage.replace("stage", ""))
             if grid > 0:
-                return f"p{self.get_stage_number(stage)}-x{grid}"
+                return f"p{get_stage_number(stage)}-x{grid}"
             else:
-                return f"p{self.get_stage_number(stage)}"
+                return f"p{get_stage_number(stage)}"
         else:
             return f"{stage}"
 
-    def job_code(self, stage: str, grid: int = -1, seed: int = 1, format_seed: bool = False) -> str:
+    def job_code(self, stage: str, grid: int = -1, seed: int | tuple = 1) -> str:
         """
         Generate unique job identifier.
         Args:
-            stage (str): Stage name (e.g., "stage1", "stage2", "stage3", "stage4", "addweights", "analysis").
+            stage (str): Stage name (e.g., "stage1", "stage2", "stage3", "stage4", "lhef").
             grid (int): Grid iteration number (default: -1, meaning no grid iteration).
-            seed (int): Random seed for the job (default: 1).
+            seed (int | tuple): Seed of the job, or a group of seeds (default: 1).
         Returns:
-            str: Unique stage identifier (e.g., "p1-x1-s1" for stage1 grid iteration 1 with seed 1).
-            format_seed (bool): Whether to format the seed as a simplified string (default: False).
-
+            str: Unique job identifier (e.g., "p1-x1-s1" for stage1 grid iteration 1 with seed 1,
+                 or "p1-x1-s1to10" for a group).
         """
-        if format_seed:
-            seed = self.format_branch_id(seed)
-        else:
-            seed = f"s{seed}"
-
-        return f"{self.stage_code(stage, grid)}-{seed}"
+        return f"{self.stage_code(stage, grid)}-{self.format_branch_id(seed)}"
 
 
 class POWHEGWrapperTask(b2luigi.WrapperTask):
@@ -360,27 +365,6 @@ class POWHEGWrapperTask(b2luigi.WrapperTask):
                                  default={},
                                  description="POWHEG configuration dictionary"
                                 )
-
-    @staticmethod
-    def get_stage_str(stage_number: int) -> str:
-        """Convert numeric stage number to string representation."""
-        assert stage_number in [1, 2, 3, 4], "Stage number must be between 1 and 4"
-
-        return f"stage{stage_number}"
-
-    @staticmethod
-    def get_stage_number(stage:str) -> int:
-        """Return the numeric stage number for resource lookup."""
-        if stage.startswith("stage") and not stage.endswith("_fullgrid"):
-            return int(stage.replace("stage", ""))
-        elif stage == "addweights":
-            return 4
-        elif stage == "analysis":
-            return 1  # Analysis stage doesn't have a specific number
-        elif stage == "stage3_fullgrid":
-            return 3
-        else:
-            raise ValueError(f"Unknown stage: {stage}")
 
     def get_config(self) -> POWHEGConfig:
         """

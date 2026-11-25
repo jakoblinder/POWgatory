@@ -22,7 +22,7 @@ from typing import Dict, Any, List
 import yaml
 
 # Import our framework classes
-from .framework import POWHEGBaseTask, POWHEGWrapperTask
+from .framework import POWHEGBaseTask, POWHEGWrapperTask, get_stage_str
 from .config import (
     POWHEGConfig, ANALYSIS_STAGES, SLURM_EXPORT, auto_grouping_size, slurm_partitions, slurm_submissions,
     slurm_tasks_per_node,
@@ -234,18 +234,18 @@ class POWHEGCreateSymlinks(POWHEGBaseTask):
         )
         if self.stage_number == 1 and self.grid_iteration > 1:
             # Depend on previous grid iteration for Stage 1
-            yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=self.grid_iteration - 1, version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=get_stage_str(1), grid_iteration=self.grid_iteration - 1, version=self.version, config=self.config)
         elif self.stage_number == 2:
             # Depend on Stage 1 for Stage 2
             stages_config       = self.config['stages']
             max_grid_iterations = stages_config['stage1'].get('grid_iterations', 3)
-            yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
         elif self.stage == "stage3" and self.config["stages"]["stage3_fullgrid"]["enabled"]:
             # The grid combination has run the first seeds of stage 3 and written the fullgrid files.
             yield POWHEGStageTimings(stage="stage3_fullgrid", version=self.version, config=self.config)
         elif self.stage_number > 2:
             # Depend on previous stage for stage > 2
-            yield POWHEGStageTimings(stage=self.get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
 
 
     def create_symlinks(self, stage: str, grid: int = -1):
@@ -302,8 +302,15 @@ class POWHEGStage(POWHEGBaseTask):
     branch_id = b2luigi.BatchIntParameter(
         default=0,
         description="Branch ID (seed index) for this parallel POWHEG execution (1 ... ntasks)",
-        grouping=True
+        grouping=True,
+        # A group holds its seeds in the order luigi's scheduler took them; sorted, the names
+        # show them as ranges (e.g. 1-10), and element k of a job array runs the k-th seed.
+        grouping_function=sorted,
     )
+
+    def task_label(self) -> str:
+        """The label of the task ID: stage, grid iteration and seed(s) as in log names, e.g. p1-x2-s7."""
+        return self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)
 
     @property
     def max_grouping_size(self) -> int:
@@ -391,7 +398,7 @@ class POWHEGStage(POWHEGBaseTask):
         """
         log_dir  = str(super().get_log_file_dir())
         # Use formatted seed for log file names:
-        job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id, format_seed=True)
+        job_code = self.job_code(stage=self.stage, grid=self.grid_iteration, seed=self.branch_id)
 
         return f"{log_dir}/{job_code}"
 
@@ -534,18 +541,18 @@ class POWHEGStage(POWHEGBaseTask):
 
         if self.stage_number == 1 and self.grid_iteration > 1:
             # Depend on previous grid iteration for Stage 1
-            yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=self.grid_iteration - 1, version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=get_stage_str(1), grid_iteration=self.grid_iteration - 1, version=self.version, config=self.config)
         elif self.stage_number == 2:
             # Depend on Stage 1 for Stage 2
             stages_config       = self.config['stages']
             max_grid_iterations = stages_config['stage1'].get('grid_iterations', 3)
-            yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
         elif self.stage == "stage3" and self.config["stages"]["stage3_fullgrid"]["enabled"]:
             # The grid combination has run the first seeds of stage 3 and written the fullgrid files.
             yield POWHEGStageTimings(stage="stage3_fullgrid", version=self.version, config=self.config)
         elif self.stage_number > 2:
             # Depend on previous stage for stage > 2
-            yield POWHEGStageTimings(stage=self.get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=get_stage_str(self.stage_number - 1), version=self.version, config=self.config)
 
     def output(self):
         """
@@ -1147,7 +1154,7 @@ class POWHEGWeightCorrection(POWHEGBaseTask):
         return "weight_correction"
 
     def requires(self):
-        yield POWHEGStageTimings(stage=self.get_stage_str(4), version=self.version, config=self.config)
+        yield POWHEGStageTimings(stage=get_stage_str(4), version=self.version, config=self.config)
 
     def output(self):
         return self.local_target("ub_corrections.yaml")
@@ -1188,7 +1195,7 @@ class POWHEGAnalysisSetup(POWHEGStageSetup):
     """
 
     def requires(self):
-        yield POWHEGStageTimings(stage=self.get_stage_str(4), version=self.version, config=self.config)
+        yield POWHEGStageTimings(stage=get_stage_str(4), version=self.version, config=self.config)
         if self.config["stages"][self.stage]["weight_correction"]:
             yield POWHEGWeightCorrection(version=self.version, config=self.config)
 
@@ -1294,6 +1301,10 @@ class POWHEGMerge(POWHEGStage):
     @property
     def job_name(self) -> str:
         return f"{self.config['job_settings']['job_name']}_{self.stage}_merge"
+
+    def task_label(self) -> str:
+        """The label of the task ID: the stage, without the branch_id, which is always 1."""
+        return f"{self.stage}-merge"
 
     def get_log_file_dir(self):
         """b2luigi's stdout and stderr of the merge, in <log_dir>/<stage>-merge/."""
@@ -1446,12 +1457,12 @@ class POWHEGWorkflow(POWHEGWrapperTask):
 
         if highest_stage == 1:
             max_grid_iterations = stages_config["stage1"]["grid_iterations"]
-            yield POWHEGStageTimings(stage=self.get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=get_stage_str(1), grid_iteration=max_grid_iterations, version=self.version, config=self.config)
         elif highest_stage == 2 and stages_config['stage3_fullgrid']['enabled']:
             # The grid combination comes between stage 2 and stage 3, so a run can stop after it.
             yield POWHEGStageTimings(stage="stage3_fullgrid", version=self.version, config=self.config)
         else:
-            yield POWHEGStageTimings(stage=self.get_stage_str(highest_stage), version=self.version, config=self.config)
+            yield POWHEGStageTimings(stage=get_stage_str(highest_stage), version=self.version, config=self.config)
 
         # The merges of the histogram files; the one of stage 2 runs while stage 3 runs, since
         # stage 3 requires stage 2's timings task, not the merge. Without a merge, an analysis
